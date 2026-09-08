@@ -147,4 +147,8 @@ dependencies {
     // ActivityResultLauncher the folder picker needs.
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.activity:activity-ktx:1.9.3")
+
+    // Port220: FT232R access to the Service Module over USB Host mode.
+    // Bundles its own FTDI driver, so no separate FTDI SDK is needed.
+    implementation("com.github.mik3y:usb-serial-for-android:3.9.0")
 }
