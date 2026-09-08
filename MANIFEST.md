@@ -18,6 +18,19 @@ the upstream copy.
 | `android/app/src/main/java/.../Port220LatencyTestActivity.kt` | **New** | The isolated latency test. Also shipped standalone as `Port220LatencyTest.zip`, which is what you should use for the first test. |
 | `port220/dosbox.conf.template` | **New** | The `[serial]` nullmodem section for the EMSAN1 game folder. Rename to `dosbox.conf` and place beside `EMSAN1.EXE`. |
 | `.github/workflows/port220-core.yml` | **New** | Builds the native core on a GitHub Ubuntu runner and uploads the four artifacts Gradle needs. Lets you build the APK on Windows without any local Linux toolchain. See Track C. |
+| `android/app/src/main/java/.../Port220ControlActivity.kt` | **New** | Start/stop the bridge and watch live status. Exists because adb can't start a non-exported service, and Android 12+ forbids background foreground-service starts — an activity solves both. |
+| `frontend/retrodos_frontend.cpp` | **Modified** | Adds `[serial]` to the allowlist of sections copied verbatim from a game's own `dosbox.conf`. **Requires a core rebuild** (re-run the CI workflow). |
+
+## Why the C++ change is necessary
+
+My earlier claim that the app honors a game's `dosbox.conf` verbatim was wrong.
+It reads exactly two things from it: the `[autoexec]` block, and the audio
+sections (`[sblaster]`, `[mixer]`, `[midi]`, `[speaker]`, `[gus]`). Everything
+else in the generated conf comes from the frontend.
+
+`build_conf` writes no `[serial]` section at all, so DOSBox-X falls back to its
+own default — a dummy port. The nullmodem line was being silently discarded,
+and no amount of Kotlin-side work would have made the bridge connect.
 
 ## Upstream files NOT touched
 

@@ -1,9 +1,9 @@
 # Port220 -- dosbox.conf for the EMSAN1 game folder
 #
-# Retro-DOS honors a game's own dosbox.conf verbatim for [autoexec] and sound
-# settings (see frontend/retrodos_config.cpp / build_conf's extra_sections).
-# That is the entire integration point: no native code changes needed for
-# the DOS/nullmodem side, only this file.
+# Retro-DOS copies only [autoexec], the audio sections, and (with the Port220
+# frontend patch) [serial] from a game's own dosbox.conf. Without that patch
+# the [serial] section below is silently discarded and DOSBox-X uses a dummy
+# port, so the bridge never connects. The patch is in the overlay.
 #
 # INSTALL: copy this file, renamed to "dosbox.conf", into the same directory
 # as EMSAN1.EXE, then copy that whole directory into Retro-DOS's game library

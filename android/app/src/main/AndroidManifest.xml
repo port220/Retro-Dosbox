@@ -47,15 +47,18 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
-        <!-- Port220: isolated USB latency smoke test. Deliberately touches
-             nothing DOSBox-related -- see PROCEDURES.md, Test 1. Launches
-             automatically when the Service Module is plugged in, or can be
-             started by hand from adb. -->
+        <!-- Port220: bridge control. Exported so adb and the launcher can
+             start it; it in turn starts the non-exported service from the
+             foreground, which is what Android 12+ requires. -->
         <activity
-            android:name=".Port220LatencyTestActivity"
+            android:name=".Port220ControlActivity"
             android:exported="true"
-            android:label="Port220 Latency Test"
-            android:theme="@android:style/Theme.Black.NoTitleBar">
+            android:label="Port220 Bridge"
+            android:theme="@android:style/Theme.Black">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
@@ -63,5 +66,15 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/port220_device_filter" />
         </activity>
+
+        <!-- Port220: isolated USB latency smoke test. Deliberately touches
+             nothing DOSBox-related; see PROCEDURES.md, Test 1. No USB-attach
+             filter here: the control activity owns that, and two filters on
+             the same device would put a chooser in front of the user. -->
+        <activity
+            android:name=".Port220LatencyTestActivity"
+            android:exported="true"
+            android:label="Port220 Latency Test"
+            android:theme="@android:style/Theme.Black.NoTitleBar" />
     </application>
 </manifest>

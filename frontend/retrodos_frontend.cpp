@@ -150,9 +150,20 @@ std::string read_conf_section(const std::string &text, const char *section)
  * is what leaves a game silent: the guest is driving hardware at an address the
  * emulator did not put a card on.
  *
- * Only the audio sections are taken. Video and CPU stay under our control,
- * because those interact with the framebuffer tap and with settings the user
- * can see and change.
+ * Only the audio sections are taken, plus [serial]. Video and CPU stay under
+ * our control, because those interact with the framebuffer tap and with
+ * settings the user can see and change.
+ *
+ * [serial] is here for Port220: a game that talks to real hardware over a
+ * nullmodem needs its serial config to survive into the generated conf, and
+ * build_conf writes no [serial] of its own, so without this the guest gets
+ * DOSBox-X's default (a dummy port) and the link silently never forms. It sits
+ * in this list rather than getting its own path because the requirement is
+ * identical -- a section the game ships that we copy through untouched.
+ *
+ * (The function name is now a slight misnomer. Left alone deliberately: the
+ * rename would touch the Game field and both call sites for no behavioural
+ * gain, and this fork wants a small diff against upstream.)
  */
 std::string bundled_audio_profile(const std::string &dir)
 {
@@ -164,7 +175,7 @@ std::string bundled_audio_profile(const std::string &dir)
     SDL_free(data);
 
     static const char *kSections[] = { "[sblaster]", "[mixer]", "[midi]",
-                                       "[speaker]", "[gus]" };
+                                       "[speaker]", "[gus]", "[serial]" };
     std::string out;
     for (const char *s : kSections) {
         const std::string body = read_conf_section(text, s);
