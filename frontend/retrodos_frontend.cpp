@@ -67,10 +67,25 @@ namespace {
  * library machinery meant its serial config depended on the scanner finding
  * the folder, the parser reading the file, and the section surviving an
  * allowlist -- three things that can each fail silently, and did. The port
- * must match Port220UsbBridgeService.NULLMODEM_PORT on the Kotlin side. */
+ * must match Port220UsbBridgeService.NULLMODEM_PORT on the Kotlin side.
+ *
+ * Syntax note, learned the hard way: nullmodem sub-parameters are key:value,
+ * NOT key=value. Written with '=', DOSBox does not recognise the server
+ * argument at all, and "no server argument" means "be a server" -- it then
+ * listens on the default port 23 and never connects to the bridge. The
+ * symptom is a clean launch with zero bytes moving in either direction.
+ *
+ * transparent:1 is required, not optional. The bridge is a raw byte pipe to
+ * a USB serial adapter, not another DOSBox at the far end. Without it DOSBox
+ * performs an RTS/DTR handshake and injects those bytes into the stream,
+ * which corrupts a protocol that expects only its own framing.
+ *
+ * rxdelay/txdelay are zeroed because txdelay defaults to gathering data
+ * before sending, which trades latency for fewer packets -- the wrong trade
+ * for a link with a ~150ms budget. */
 static const char *kPort220Sections =
     "[serial]\n"
-    "serial1=nullmodem server=127.0.0.1 port=6403 rxdelay=0 txdelay=0\n";
+    "serial1=nullmodem server:127.0.0.1 port:6403 transparent:1 rxdelay:0 txdelay:0\n";
 
 /* Where its files live: app-private INTERNAL storage.
  *

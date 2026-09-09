@@ -24,7 +24,7 @@
 [serial]
 # DOSBox-X connects OUT to the bridge service, which is listening on
 # loopback. Port must match Port220UsbBridgeService.NULLMODEM_PORT (6403).
-serial1=nullmodem server=127.0.0.1 port=6403 rxdelay=0 txdelay=0
+serial1=nullmodem server:127.0.0.1 port:6403 transparent:1 rxdelay:0 txdelay:0
 
 [autoexec]
 @echo off

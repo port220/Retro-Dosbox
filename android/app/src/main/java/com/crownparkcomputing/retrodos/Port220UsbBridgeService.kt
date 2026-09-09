@@ -67,8 +67,11 @@ class Port220UsbBridgeService : Service() {
         private const val NOTIFICATION_CHANNEL_ID = "port220_bridge"
         private const val NOTIFICATION_ID = 1
 
-        /** How many inbound bytes to dump as hex before going quiet. */
-        private const val HEX_LOG_BUDGET = 64
+        /**
+         * Cap on the capture file. A stalled session can otherwise fill
+         * storage; 4MB is far more than any EMSAN1 exchange produces.
+         */
+        private const val CAPTURE_LIMIT_BYTES = 4L * 1024 * 1024
 
         @Volatile
         var isBridgeReady: Boolean = false
@@ -103,7 +106,11 @@ class Port220UsbBridgeService : Service() {
     /** Guards against the multiple-open path that caused the endpoint fight. */
     @Volatile private var portOpen = false
     @Volatile private var serverStarted = false
-    private var hexLogged = 0
+
+    /** Bidirectional capture, for offline analysis of a failed session. */
+    private var capture: java.io.BufferedWriter? = null
+    private var captureBytes = 0L
+    private var captureStartMs = 0L
 
     private val usbPermissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -204,13 +211,14 @@ class Port220UsbBridgeService : Service() {
         }
         serialPort = port
         portOpen = true
+        openCapture()
 
         // Bytes go straight out to the TCP socket as they arrive. The latency
         // budget is the point of this class: no queue, no batching, no delay.
         ioManager = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
             override fun onNewData(data: ByteArray) {
                 bytesUsbToTcp += data.size
-                logHex(data)
+                record("ECU->EMSAN1", data, data.size)
                 val sock = clientSocket
                 if (sock == null) {
                     // Inbound bytes with nobody listening. Counted separately
@@ -240,18 +248,59 @@ class Port220UsbBridgeService : Service() {
         startNullmodemServer()
     }
 
-    private fun logHex(data: ByteArray) {
-        if (hexLogged >= HEX_LOG_BUDGET) return
-        val take = minOf(data.size, HEX_LOG_BUDGET - hexLogged)
-        val hex = data.copyOf(take).joinToString(" ") { "%02X".format(it) }
-        Log.i(TAG, "USB in [$take]: $hex")
-        hexLogged += take
+    /**
+     * Opens the capture file. Truncated on each open so a session's capture
+     * is that session's, not an accumulation across attempts.
+     *
+     * Format is one line per chunk: milliseconds since capture start, the
+     * direction, the byte count, then hex. Deliberately plain text rather
+     * than binary so it can be read without tooling and pasted into a
+     * conversation, and so the inter-chunk timing is visible -- with a
+     * protocol this timing-sensitive, when bytes arrive matters as much as
+     * which bytes arrive.
+     */
+    private fun openCapture() {
+        try {
+            val f = java.io.File(filesDir, "port220_capture.log")
+            capture = java.io.BufferedWriter(java.io.FileWriter(f, false))
+            captureBytes = 0
+            captureStartMs = System.currentTimeMillis()
+            capture?.write("# Port220 capture, baud $BAUD_RATE 8N1\n")
+            capture?.write("# ms_since_start direction count hex\n")
+            capture?.flush()
+            Log.i(TAG, "Capturing to ${f.absolutePath}")
+        } catch (e: IOException) {
+            Log.w(TAG, "Could not open capture file: ${e.message}")
+            capture = null
+        }
+    }
+
+    @Synchronized
+    private fun record(direction: String, data: ByteArray, len: Int) {
+        val w = capture ?: return
+        if (captureBytes >= CAPTURE_LIMIT_BYTES) return
+        try {
+            val ms = System.currentTimeMillis() - captureStartMs
+            val hex = StringBuilder(len * 3)
+            for (i in 0 until len) hex.append("%02X ".format(data[i]))
+            val line = "$ms $direction $len ${hex.toString().trim()}\n"
+            w.write(line)
+            // Flushed per chunk: a session that ends in a crash or an unplug
+            // still leaves a usable capture, which is exactly the case we
+            // most need it for.
+            w.flush()
+            captureBytes += line.length
+        } catch (e: IOException) {
+            Log.w(TAG, "Capture write failed: ${e.message}")
+        }
     }
 
     @Synchronized
     private fun closePort() {
         portOpen = false
         isBridgeReady = false
+        try { capture?.flush(); capture?.close() } catch (_: IOException) {}
+        capture = null
         ioManager?.stop()
         ioManager = null
         try { serialPort?.close() } catch (_: IOException) {}
@@ -300,6 +349,7 @@ class Port220UsbBridgeService : Service() {
                 val n = input.read(buf)
                 if (n < 0) break
                 bytesTcpToUsb += n
+                record("EMSAN1->ECU", buf, n)
                 serialPort?.write(buf.copyOf(n), 1000)
             }
         } catch (e: IOException) {

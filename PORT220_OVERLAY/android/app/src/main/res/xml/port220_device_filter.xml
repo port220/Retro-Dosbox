@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-    Port220 Service Module: FT232R USB-to-serial, vendor 0x0403 (FTDI),
-    product 0x6001. Decimal here because Android's resource parser wants
-    decimal, not hex: 0x0403 = 1027, 0x6001 = 24577.
--->
-<resources>
-    <usb-device vendor-id="1027" product-id="24577" />
-</resources>
