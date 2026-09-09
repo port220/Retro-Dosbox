@@ -109,6 +109,88 @@ if [ ! -d "$TREE" ]; then
 fi
 
 cd "$TREE"
+
+# ---------------------------------------------------------------------------
+# 1b. Port220 serial backend
+# ---------------------------------------------------------------------------
+# The core is a submodule, so its sources are not ours to edit in git. The
+# backend is injected into the staged tree instead, which keeps the fork's
+# diff against upstream in one place (core-patch/) and means no second fork
+# to maintain.
+#
+# Why a backend at all: DOSBox-X's `nullmodem` lives behind #if C_MODEM, and
+# C_MODEM requires SDL_net, which is switched off below (--disable-sdlnet).
+# With it off, serialport.cpp does not recognise the string "nullmodem" and a
+# [serial] line naming it is silently ignored -- the failure mode is a clean
+# launch with no connection and no error anywhere. port220serial.cpp uses
+# plain POSIX sockets, so it needs no SDL_net and cannot break on SDL version
+# skew.
+#
+# Every step below is checked. A silently skipped patch here would produce a
+# core that builds, runs, and cannot talk to the bridge.
+PATCHDIR="$APP/core-patch"
+SERIALDIR="$TREE/src/hardware/serialport"
+
+if [ -d "$PATCHDIR" ]; then
+    echo "==> injecting Port220 serial backend"
+
+    for f in port220serial.cpp port220serial.h; do
+        [ -f "$PATCHDIR/$f" ] || { echo "error: missing $PATCHDIR/$f" >&2; exit 1; }
+        cp "$PATCHDIR/$f" "$SERIALDIR/$f"
+    done
+
+    # (a) build it: add to the serial library's source list.
+    if ! grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am"; then
+        sed -i 's|serialdummy\.cpp serialdummy\.h serialport\.cpp|serialdummy.cpp serialdummy.h serialport.cpp port220serial.cpp port220serial.h|' \
+            "$SERIALDIR/Makefile.am"
+        grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am" || {
+            echo "error: could not add port220serial.cpp to Makefile.am" >&2; exit 1; }
+    fi
+
+    # (b) declare it.
+    if ! grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp"; then
+        sed -i 's|#include "nullmodem.h"|#include "nullmodem.h"\n#include "port220serial.h"|' \
+            "$SERIALDIR/serialport.cpp"
+        grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp" || {
+            echo "error: could not add the port220serial.h include" >&2; exit 1; }
+    fi
+
+    # (c) register the type. Inserted before the "disabled" branch, which sits
+    #     OUTSIDE the #if C_MODEM block -- putting it inside would compile it
+    #     out again and reproduce the exact bug this fixes.
+    if ! grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp"; then
+        python3 - "$SERIALDIR/serialport.cpp" <<'PYEOF'
+import sys, io
+path = sys.argv[1]
+src = io.open(path, encoding='utf-8', errors='surrogateescape').read()
+anchor = '\t\t\telse if(type=="disabled") {'
+block = (
+    '\t\t\telse if(type=="port220") {\n'
+    '\t\t\t\tserialports[i] = new CSerialPort220 (i, &cmd);\n'
+    '\t\t\t\tserialports[i]->serialType = SERIAL_TYPE_DUMMY;\n'
+    '\t\t\t\tserialports[i]->baud_multiplier = multiplier;\n'
+    '\t\t\t\tcmd.GetStringRemain(serialports[i]->commandLineString);\n'
+    '\t\t\t\tif (!serialports[i]->InstallationSuccessful)  {\n'
+    '\t\t\t\t\tdelete serialports[i];\n'
+    '\t\t\t\t\tserialports[i] = NULL;\n'
+    '\t\t\t\t}\n'
+    '\t\t\t}\n'
+)
+if anchor not in src:
+    sys.stderr.write('error: could not find the serial type dispatch anchor\n')
+    sys.exit(1)
+src = src.replace(anchor, block + anchor, 1)
+io.open(path, 'w', encoding='utf-8', errors='surrogateescape').write(src)
+PYEOF
+        grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp" || {
+            echo "error: could not register the port220 serial type" >&2; exit 1; }
+    fi
+
+    # autotools must regenerate: Makefile.am changed.
+    rm -f "$TREE/config.h" "$SERIALDIR/Makefile.in"
+    echo "==> Port220 serial backend injected"
+fi
+
 [ -f configure ] || ./autogen.sh
 
 if [ ! -f config.h ]; then

@@ -66,26 +66,19 @@ namespace {
  * Service Module is a diagnostic tool, not a game, and routing it through the
  * library machinery meant its serial config depended on the scanner finding
  * the folder, the parser reading the file, and the section surviving an
- * allowlist -- three things that can each fail silently, and did. The port
- * must match Port220UsbBridgeService.NULLMODEM_PORT on the Kotlin side.
+ * allowlist -- three things that can each fail silently, and did.
  *
- * Syntax note, learned the hard way: nullmodem sub-parameters are key:value,
- * NOT key=value. Written with '=', DOSBox does not recognise the server
- * argument at all, and "no server argument" means "be a server" -- it then
- * listens on the default port 23 and never connects to the bridge. The
- * symptom is a clean launch with zero bytes moving in either direction.
+ * The type is `port220`, not `nullmodem`. nullmodem lives behind #if C_MODEM,
+ * which requires SDL_net, which the Android core builds without -- so
+ * serialport.cpp does not recognise the word and the line is ignored in
+ * silence. core-patch/port220serial.cpp supplies an equivalent backend over
+ * plain POSIX sockets, injected into the tree by build-core.sh.
  *
- * transparent:1 is required, not optional. The bridge is a raw byte pipe to
- * a USB serial adapter, not another DOSBox at the far end. Without it DOSBox
- * performs an RTS/DTR handshake and injects those bytes into the stream,
- * which corrupts a protocol that expects only its own framing.
- *
- * rxdelay/txdelay are zeroed because txdelay defaults to gathering data
- * before sending, which trades latency for fewer packets -- the wrong trade
- * for a link with a ~150ms budget. */
+ * port: must match Port220UsbBridgeService.NULLMODEM_PORT on the Kotlin side.
+ * Parameters are key:value, matching every other DOSBox serial backend. */
 static const char *kPort220Sections =
     "[serial]\n"
-    "serial1=nullmodem server:127.0.0.1 port:6403 transparent:1 rxdelay:0 txdelay:0\n";
+    "serial1=port220 host:127.0.0.1 port:6403\n";
 
 /* Where its files live: app-private INTERNAL storage.
  *

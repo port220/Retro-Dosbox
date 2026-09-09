@@ -77,6 +77,20 @@ class Port220UsbBridgeService : Service() {
         var isBridgeReady: Boolean = false
             private set
 
+        /**
+         * Whether the FT232R is open. Distinct from isBridgeReady, which is
+         * about DOSBox. Without this the control activity cannot tell a
+         * successful open from a failed one -- both look like "waiting".
+         */
+        @Volatile
+        var isPortOpen: Boolean = false
+            private set
+
+        /** Last thing that happened, in words, for display. */
+        @Volatile
+        var lastStatus: String = "Idle"
+            private set
+
         @Volatile
         var bytesUsbToTcp: Long = 0
             private set
@@ -150,6 +164,7 @@ class Port220UsbBridgeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (portOpen) {
             Log.i(TAG, "Start ignored: port already open")
+            lastStatus = "Already running"
         } else {
             findAndRequestDevice()
         }
@@ -164,6 +179,7 @@ class Port220UsbBridgeService : Service() {
         }
         if (driver == null) {
             Log.w(TAG, "Service Module not found among ${drivers.size} USB serial device(s)")
+            lastStatus = "Service Module not found (${drivers.size} serial devices seen)"
             updateNotification("Service Module not found")
             return
         }
@@ -179,6 +195,7 @@ class Port220UsbBridgeService : Service() {
         val permissionIntent = PendingIntent.getBroadcast(
             this, 0, Intent(ACTION_USB_PERMISSION), flags
         )
+        lastStatus = "Requesting USB permission\u2026"
         manager.requestPermission(device, permissionIntent)
     }
 
@@ -195,6 +212,7 @@ class Port220UsbBridgeService : Service() {
         }
         val connection = manager.openDevice(driver.device) ?: run {
             Log.e(TAG, "openDevice() failed -- charge-only cable, or another app holds it")
+            lastStatus = "USB open failed - check the cable"
             updateNotification("USB open failed \u2014 check cable")
             return
         }
@@ -205,12 +223,15 @@ class Port220UsbBridgeService : Service() {
             port.setParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY)
         } catch (e: IOException) {
             Log.e(TAG, "Failed to open/configure serial port", e)
+            lastStatus = "Serial config failed: ${e.message}"
             updateNotification("Serial config failed: ${e.message}")
             try { port.close() } catch (_: IOException) {}
             return
         }
         serialPort = port
         portOpen = true
+        isPortOpen = true
+        lastStatus = "FT232R open at $BAUD_RATE baud"
         openCapture()
 
         // Bytes go straight out to the TCP socket as they arrive. The latency
@@ -239,6 +260,7 @@ class Port220UsbBridgeService : Service() {
                 // and the port half-usable. Tear down so a later start can
                 // cleanly reopen.
                 Log.e(TAG, "USB read error, closing port", e)
+                lastStatus = "USB read error: " + e.message
                 updateNotification("USB error: ${e.message}")
                 closePort()
             }
@@ -298,6 +320,7 @@ class Port220UsbBridgeService : Service() {
     @Synchronized
     private fun closePort() {
         portOpen = false
+        isPortOpen = false
         isBridgeReady = false
         try { capture?.flush(); capture?.close() } catch (_: IOException) {}
         capture = null
@@ -329,6 +352,7 @@ class Port220UsbBridgeService : Service() {
                     clientSocket = client
                     isBridgeReady = true
                     Log.i(TAG, "DOSBox connected")
+                    lastStatus = "DOSBox connected"
                     updateNotification("Bridged: Service Module \u2194 DOSBox")
                     pumpTcpToUsb(client)
                 }

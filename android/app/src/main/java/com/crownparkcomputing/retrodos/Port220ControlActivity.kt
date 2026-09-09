@@ -84,8 +84,12 @@ class Port220ControlActivity : Activity() {
         thread {
             while (polling) {
                 val text = buildString {
-                    append("Bridge: ")
+                    append("USB port: ")
+                    append(if (Port220UsbBridgeService.isPortOpen) "OPEN" else "closed")
+                    append("\nDOSBox: ")
                     append(if (Port220UsbBridgeService.isBridgeReady) "CONNECTED" else "not connected")
+                    append("\n\n")
+                    append(Port220UsbBridgeService.lastStatus)
                     append("\n\nTCP port: ")
                     append(Port220UsbBridgeService.NULLMODEM_PORT)
                     append("\nUSB -> TCP: ")

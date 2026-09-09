@@ -50,3 +50,14 @@ the nullmodem config goes in as data, not as a code change.
 - Any timing-sensitive `[dosbox]`/`[cpu]` settings from your working
   Mac/Windows conf are **not** carried over — I don't have that file. Copy
   them into the template before a real ECU session.
+
+## Core patch (new)
+
+| File | What it does |
+|---|---|
+| `core-patch/port220serial.h` / `.cpp` | A `CSerial` backend over plain POSIX sockets. Replaces DOSBox-X's `nullmodem`, which is compiled out on Android. |
+| `android/build-core.sh` | **Modified.** Injects the backend into the staged core tree before configure, and registers the `port220` serial type. Every patch step is verified and fails the build loudly if it does not apply. |
+
+The core is a git submodule, so its sources are not ours to commit. The
+backend lives in `core-patch/` in this repo and is copied into the staged tree
+at build time — no second fork to maintain.
