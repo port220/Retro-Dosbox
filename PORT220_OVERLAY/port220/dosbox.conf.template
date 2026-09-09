@@ -1,0 +1,32 @@
+# Port220 -- dosbox.conf for the EMSAN1 game folder
+#
+# Retro-DOS copies only [autoexec], the audio sections, and (with the Port220
+# frontend patch) [serial] from a game's own dosbox.conf. Without that patch
+# the [serial] section below is silently discarded and DOSBox-X uses a dummy
+# port, so the bridge never connects. The patch is in the overlay.
+#
+# INSTALL: copy this file, renamed to "dosbox.conf", into the same directory
+# as EMSAN1.EXE, then copy that whole directory into Retro-DOS's game library
+# folder (the one chosen via the folder picker on first run) as "Port220".
+#
+# Baud confirmed: 10400 established, 9600 N81 fallback. Both are set in
+# Port220UsbBridgeService.kt on the Android side, not here -- this [serial]
+# line only tells DOSBox-X how to reach the bridge's TCP socket, it has no
+# baud setting of its own to match.
+#
+# TODO before a real ECU session:
+#   - Copy over any [dosbox]/[cpu] timing-sensitive settings your existing
+#     Mac/Windows conf uses for EMSAN1 (cycles, core) if they differ from
+#     Retro-DOS's defaults -- the W3 echo completion gate is a DOS-side
+#     concern and will behave the same here as elsewhere IF timing is close
+#     enough to the working builds. Verify, don't assume.
+
+[serial]
+# DOSBox-X connects OUT to the bridge service, which is listening on
+# loopback. Port must match Port220UsbBridgeService.NULLMODEM_PORT (6403).
+serial1=nullmodem server=127.0.0.1 port=6403 rxdelay=0 txdelay=0
+
+[autoexec]
+@echo off
+C:
+EMSAN1.EXE
