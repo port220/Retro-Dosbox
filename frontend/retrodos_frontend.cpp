@@ -60,6 +60,26 @@ namespace {
 /* Library                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Port220: the [serial] section handed to DOSBox-X, hardcoded.
+ *
+ * Deliberately NOT read from a dosbox.conf in the game folder. The Port220
+ * Service Module is a diagnostic tool, not a game, and routing it through the
+ * library machinery meant its serial config depended on the scanner finding
+ * the folder, the parser reading the file, and the section surviving an
+ * allowlist -- three things that can each fail silently, and did. The port
+ * must match Port220UsbBridgeService.NULLMODEM_PORT on the Kotlin side. */
+static const char *kPort220Sections =
+    "[serial]\n"
+    "serial1=nullmodem server=127.0.0.1 port=6403 rxdelay=0 txdelay=0\n";
+
+/* Where its files live: app-private INTERNAL storage.
+ *
+ * Not the library root under /sdcard/Android/data. That directory is writable
+ * by adb but the entries it creates are owned by shell, and the scanner's
+ * behaviour there proved unreliable. Internal storage is owned by the app by
+ * construction, so there is no ownership question and no SAF grant needed. */
+static const char *kPort220DirName = "/port220";
+
 struct Game {
     std::string name;
     std::string dir;          /* real path; empty for a SAF game until staged */
@@ -940,6 +960,35 @@ int main(int argc, char **argv)
             std::sort(games.begin(), games.end(), [](const Game &a, const Game &b) {
                 return SDL_strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
             });
+        }
+
+        /* Port220, always, and first.
+         *
+         * Independent of scan_library, of SAF, and of any shipped dosbox.conf:
+         * if the directory exists, the entry exists. Its autoexec and its
+         * [serial] section are built here rather than parsed from a file, so
+         * there is nothing to silently discard. This is the whole reason the
+         * entry is synthetic instead of a folder in the library. */
+        {
+            const std::string p220_dir = cfg_dir + kPort220DirName;
+            SDL_PathInfo p220_info;
+            if (SDL_GetPathInfo(p220_dir.c_str(), &p220_info) &&
+                p220_info.type == SDL_PATHTYPE_DIRECTORY) {
+                Game g;
+                g.name     = "Port220";
+                g.dir      = p220_dir;
+                g.initial  = 'P';
+                g.run      = "EMSAN1.EXE";
+                g.run_raw  = true;
+                /* Non-empty autoexec makes the launch path use it verbatim,
+                 * which is what we want: mount, C:, then the program. */
+                g.autoexec = "EMSAN1.EXE\n";
+                /* Passed through build_conf's extra_sections untouched. The
+                 * field is named for audio because that was its only use
+                 * upstream; it is simply "sections emitted verbatim". */
+                g.audio_profile = kPort220Sections;
+                games.insert(games.begin(), g);
+            }
         }
 
         /* Nothing found -- a fresh install, a revoked grant, or an absent SD
