@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Port220 user-facing text, in one place.
+
+    Product decision: the app is "Port220 Command Module" to the user. The
+    package id stays com.dosboxx.app (changing it would orphan the installed
+    base and every device's USB permission grant), but nothing the user sees
+    says "Retro-DOS" or "dosbox".
+-->
+<resources>
+    <string name="app_name">Port220</string>
+    <string name="app_name_full">Port220 Command Module</string>
+
+    <!-- Launcher entries -->
+    <string name="activity_emulator">Port220</string>
+    <string name="activity_bridge">Port220 Service</string>
+    <string name="activity_latency">Port220 Diagnostics</string>
+</resources>

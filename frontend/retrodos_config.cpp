@@ -154,6 +154,31 @@ void default_pad_keys(int *k)
     k[13] = SDL_SCANCODE_ESCAPE;   /* Select */
 }
 
+void port220_pad_keys(int *k)
+{
+    /* EMSAN1 is menu-driven and answers prompts with letter keys. The three
+     * face buttons are relabelled to the answers the software expects, so a
+     * technician can drive it entirely from the on-screen pad:
+     *   A -> D   X -> N   Y -> Y
+     * Directional pad, Start (Enter) and Select (Escape) keep their normal
+     * roles for moving through menus and confirming/cancelling. B is left on
+     * its default so it still does something predictable if pressed. */
+    k[0]  = SDL_SCANCODE_UP;
+    k[1]  = SDL_SCANCODE_DOWN;
+    k[2]  = SDL_SCANCODE_LEFT;
+    k[3]  = SDL_SCANCODE_RIGHT;
+    k[4]  = SDL_SCANCODE_D;        /* A -> D */
+    k[5]  = SDL_SCANCODE_LALT;     /* B -- unchanged default */
+    k[6]  = SDL_SCANCODE_N;        /* X -> N */
+    k[7]  = SDL_SCANCODE_Y;        /* Y -> Y */
+    k[8]  = SDL_SCANCODE_PAGEUP;   /* L */
+    k[9]  = SDL_SCANCODE_PAGEDOWN; /* R */
+    k[10] = 0;
+    k[11] = 0;
+    k[12] = SDL_SCANCODE_RETURN;   /* Start  */
+    k[13] = SDL_SCANCODE_ESCAPE;   /* Select */
+}
+
 void descent_pad_keys(int *k)
 {
     /* Descent flies in six degrees of freedom, which is exactly why a d-pad

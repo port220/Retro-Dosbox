@@ -74,3 +74,36 @@ at build time — no second fork to maintain.
 | Guest DTR/RTS/break logged | `core-patch/port220serial.cpp` | Shows what EMSAN1 does with the control lines. |
 | Purge on open, read thread at audio priority | `Port220UsbBridgeService.kt` | Removes stale bytes and scheduling jitter. |
 | Baud toggle, floating overlay | `Port220ControlActivity.kt`, `Port220Overlay.kt` | Experiment without rebuilding; watch counters over Retro-DOS. |
+
+## Packaging pass (Track G) — cosmetic only, no serial-path changes
+
+| File | Change |
+|---|---|
+| `res/values/strings.xml` | **New.** All user-facing text in one place. App is "Port220" / "Port220 Command Module". |
+| `res/drawable/port220_icon_background.xml` | **New.** Vector adaptive-icon background (dark instrument-panel gradient). |
+| `res/drawable/port220_icon_foreground.xml` | **New.** Vector foreground: diagnostic connector + "220". |
+| `res/mipmap-anydpi-v26/ic_launcher.xml` / `_round.xml` | **Modified.** Point the adaptive icon at the new vectors. |
+| `AndroidManifest.xml` | **Modified.** Labels now come from string resources; no user-visible "Retro-DOS"/"dosbox" remains. |
+
+Deliberately unchanged: package id (`com.dosboxx.app` — changing it would
+orphan the installed base and every USB permission grant), the serial path,
+the launch flow, themes, and every activity's behaviour. This pass touches
+names and pictures only.
+
+
+## Logo + pad pass (Track H)
+
+| File | Change |
+|---|---|
+| `res/mipmap-*/ic_launcher*.png` | **New/replaced.** Port220 badge icon (green plate, gold-framed "220") at all five densities, plus adaptive fore/background layers. Brand colours sampled from the supplied logo. |
+| `res/mipmap-anydpi-v26/ic_launcher.xml` / `_round.xml` | **Modified.** Adaptive icon points at the PNG layers. |
+| `frontend/retrodos_config.cpp` / `.h` | **Modified.** Adds `port220_pad_keys()`: A->D, X->N, Y->Y; arrows/ENT/ESC unchanged. |
+| `frontend/retrodos_frontend.cpp` | **Modified.** Applies that pad profile for the Port220 title, next to its CPU-timing override. |
+
+The wide badge is deliberately NOT the launcher icon: an adaptive icon is
+masked to a circle/squircle and a long thin badge would be clipped or float
+tiny. The square "220" plate keeps the brand and survives masking. The full
+badge suits an in-app splash if one is added later.
+
+Pad remap is a launch-time profile for the Port220 title only, mirroring how
+the Descent profile works, so games keep their normal mapping.

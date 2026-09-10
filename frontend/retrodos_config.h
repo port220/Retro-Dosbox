@@ -94,6 +94,10 @@ void default_pad_keys(int *keys);
  *  laid out for an Xbox-style pad. Fills all PAD_COUNT entries. */
 void descent_pad_keys(int *keys);
 
+/* Port220: on-screen pad tuned for EMSAN1. A->D, X->N, Y->Y; arrows, ENT,
+ * ESC unchanged. Applied automatically for the Port220 title. */
+void port220_pad_keys(int *keys);
+
 /* App-level state that is not per-game. */
 struct AppConfig {
     std::string library_root;      /* where games live                    */

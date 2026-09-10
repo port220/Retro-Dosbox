@@ -1167,6 +1167,10 @@ int main(int argc, char **argv)
             launch_settings.cycles_max   = false;
             launch_settings.cycles_fixed = 3000;
             launch_settings.core_dynamic = false;   /* normal core: deterministic timing */
+            /* Relabel the on-screen face buttons to the letter keys EMSAN1's
+             * prompts expect (A->D, X->N, Y->Y), so the tool is drivable from
+             * the pad alone. Arrows/ENT/ESC are unchanged. */
+            retrodos::port220_pad_keys(launch_settings.pad_keys);
         }
 
         const std::string conf = retrodos::build_conf(

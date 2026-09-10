@@ -413,7 +413,15 @@ class Port220UsbBridgeService : Service() {
                 // otherwise a restart can hit TIME_WAIT and fail to listen.
                 val socket = ServerSocket()
                 socket.reuseAddress = true
-                socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), NULLMODEM_PORT), 1)
+                // Pin to IPv4 127.0.0.1 explicitly. getLoopbackAddress() can
+                // return the IPv6 loopback ::1 on a dual-stack device, which
+                // binds an IPv6-only socket -- and the C++ backend connects
+                // with inet_pton(AF_INET) to 127.0.0.1, i.e. IPv4. An IPv4
+                // client cannot reach an IPv6 listener, so every connect is
+                // refused forever even though both sides are "correct". This
+                // is the same v4/v6 split that broke apt in WSL earlier.
+                val loopbackV4 = InetAddress.getByName("127.0.0.1")
+                socket.bind(InetSocketAddress(loopbackV4, NULLMODEM_PORT), 1)
                 serverSocket = socket
                 updateNotification("Waiting for DOSBox on port $NULLMODEM_PORT\u2026")
                 Log.i(TAG, "Listening on 127.0.0.1:$NULLMODEM_PORT")
