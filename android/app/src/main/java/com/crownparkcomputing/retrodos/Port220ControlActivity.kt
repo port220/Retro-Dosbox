@@ -2,7 +2,10 @@ package com.crownparkcomputing.retrodos
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -52,6 +55,28 @@ class Port220ControlActivity : Activity() {
             setOnClickListener { stopBridge() }
         }
 
+        // Floating readout, so the counters stay visible while Retro-DOS is
+        // fullscreen. Needs a permission Android will not grant from code,
+        // so send the user to the right Settings page rather than failing
+        // silently when it is missing.
+        val overlayBtn = Button(this).apply {
+            text = "Toggle overlay"
+            setOnClickListener {
+                if (!Port220Overlay.hasPermission(this@Port220ControlActivity)) {
+                    status.text = "Grant \"Display over other apps\", then tap again"
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        startActivity(Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName")))
+                    }
+                } else if (Port220Overlay.isShowing) {
+                    Port220Overlay.hide()
+                } else {
+                    Port220Overlay.show(this@Port220ControlActivity)
+                }
+            }
+        }
+
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -59,6 +84,7 @@ class Port220ControlActivity : Activity() {
             addView(status)
             addView(startBtn)
             addView(stopBtn)
+            addView(overlayBtn)
         })
 
         // Launched by the USB_DEVICE_ATTACHED filter means the Service Module

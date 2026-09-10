@@ -197,10 +197,26 @@ PYEOF
         echo "error: could not register the port220 serial type" >&2; exit 1; }
 fi
 
-# Belt and braces: prove all three landed before spending 20 minutes compiling.
+# (d) allow the type through config validation.
+#     serial1's "type" property is declared with Set_values(serials), an
+#     enumerated allow-list in src/dosbox.cpp. A value not in that list is
+#     rejected by the property parser and silently replaced with the default
+#     ("dummy") -- so the dispatch patched in (c) never sees the string, and
+#     the backend never constructs even though it is compiled and linked.
+#     This was invisible until the backend logged from its constructor: the
+#     binary provably contained the code, and nothing ran it.
+if ! grep -q '"port220"' "$TREE/src/dosbox.cpp"; then
+    sed -i 's|const char\* serials\[\] = { "dummy", "disabled", "modem", "nullmodem", "serialmouse", "directserial", "log", "file", nullptr };|const char* serials[] = { "dummy", "disabled", "modem", "nullmodem", "serialmouse", "directserial", "log", "file", "port220", nullptr };|' \
+        "$TREE/src/dosbox.cpp"
+    grep -q '"port220"' "$TREE/src/dosbox.cpp" || {
+        echo "error: could not add port220 to the allowed serial types" >&2; exit 1; }
+fi
+
+# Belt and braces: prove all four landed before spending 20 minutes compiling.
 grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am" || { echo "error: Makefile.am patch lost" >&2; exit 1; }
 grep -q 'port220serial\.h'   "$SERIALDIR/serialport.cpp" || { echo "error: include patch lost" >&2; exit 1; }
 grep -q 'CSerialPort220'     "$SERIALDIR/serialport.cpp" || { echo "error: registration patch lost" >&2; exit 1; }
+grep -q '"port220"'          "$TREE/src/dosbox.cpp" || { echo "error: allowed-values patch lost" >&2; exit 1; }
 
 # autotools must regenerate: Makefile.am changed. Both files are gitignored
 # upstream and so absent from the staged tree anyway, which means autogen.sh
