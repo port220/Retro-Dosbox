@@ -1145,36 +1145,54 @@ int main(int argc, char **argv)
 
         Settings s = cfg.defaults;
         retrodos::load_game_settings(games_dir, g.name, s);  /* overrides win */
+
+        /* Port220 overrides, applied to s BEFORE `active = s`.
+         *
+         * This placement is the fix for the key mapping not taking: the
+         * running on-screen pad reads `active.pad_keys` (see the pad draw
+         * code), and the conf is built from these settings too. An earlier
+         * version put these in a separate `launch_settings` used only for
+         * build_conf, so the CPU timing reached the conf but the pad kept the
+         * defaults. Everything Port220-specific must live here, on s.
+         *
+         * CPU: Retro-DOS defaults to cycles=max, right for games and wrong for
+         * this. EMSAN1 is 1990s real-mode software whose busy-wait delay loops
+         * are calibrated to CPU speed; at max they finish instantly and the
+         * timing gates it relies on collapse. 3000 fixed is what core=auto
+         * gives a real-mode program, i.e. what a default Mac config runs it at.
+         *
+         * Pad: relabel the face buttons to the letters EMSAN1's prompts expect
+         * (A->D, X->N, Y->Y); arrows, Enter, Escape unchanged. */
+        if (g.name == "Port220") {
+            s.cycles_max   = false;
+            s.cycles_fixed = 3000;
+            s.core_dynamic = false;
+            retrodos::port220_pad_keys(s.pad_keys);
+
+            /* Swap the on-screen pad to the stripped EMSAN1 layout: d-pad,
+             * D/N/Y, Esc, Ent, pushed to the corners clear of the fault text.
+             * A game's saved custom layout must not leak in here, so this is
+             * set unconditionally for Port220. */
+            int ww = 0, wh = 0;
+            SDL_GetWindowSizeInPixels(win, &ww, &wh);
+            pad.set_controls(retrodos::port220_pad_layout(ww, wh));
+        } else {
+            /* Restore the normal layout for anything else, in case Port220
+             * was launched earlier this session. */
+            int ww = 0, wh = 0;
+            SDL_GetWindowSizeInPixels(win, &ww, &wh);
+            pad.reset_layout(ww, wh);
+            std::vector<retrodos::PadControl> saved;
+            if (pad_layout_from_string(cfg.pad_layout, saved)) pad.set_controls(saved);
+        }
+
         active = s;
         /* A conf shipped with the game states how it starts; use it verbatim
          * rather than the guessed program name. */
         const bool use_profile = !g.autoexec.empty();
-        /* Port220 gets its own CPU timing, not the library's.
-         *
-         * Retro-DOS defaults to cycles=max, which is right for games and
-         * wrong for this: EMSAN1 is 1990s real-mode diagnostic software, and
-         * that era's code uses busy-wait delay loops calibrated to CPU speed.
-         * At max those loops finish in no time, and the timing gates the
-         * program relies on -- including waiting on a K-line echo -- collapse.
-         *
-         * 3000 is DOSBox's classic default and what `core=auto` gives a
-         * real-mode program, i.e. what a default Mac config runs EMSAN1 at.
-         * Fixed rather than auto so it does not drift. A modest 286/386-class
-         * figure is the right starting point; adjust only with a captured
-         * reference to compare against, not by feel. */
-        retrodos::Settings launch_settings = s;
-        if (g.name == "Port220") {
-            launch_settings.cycles_max   = false;
-            launch_settings.cycles_fixed = 3000;
-            launch_settings.core_dynamic = false;   /* normal core: deterministic timing */
-            /* Relabel the on-screen face buttons to the letter keys EMSAN1's
-             * prompts expect (A->D, X->N, Y->Y), so the tool is drivable from
-             * the pad alone. Arrows/ENT/ESC are unchanged. */
-            retrodos::port220_pad_keys(launch_settings.pad_keys);
-        }
 
         const std::string conf = retrodos::build_conf(
-            launch_settings, g.name, g.dir,
+            s, g.name, g.dir,
             use_profile ? g.autoexec : g.run,
             use_profile ? true : g.run_raw,
             g.audio_profile);

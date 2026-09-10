@@ -29,6 +29,10 @@
         android:hardwareAccelerated="true"
         android:extractNativeLibs="true">
 
+        <!-- The emulator. No longer a launcher entry. Port220 is a single
+             app whose entry point is the control screen, which starts the
+             bridge and then launches this. Still exported so the control
+             activity can start it by component. -->
         <activity
             android:name=".MainActivity"
             android:label="@string/activity_emulator"
@@ -37,28 +41,21 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode|density"
-            android:preferMinimalPostProcessing="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:preferMinimalPostProcessing="true" />
 
-        <!-- Port220: standalone USB<->TCP nullmodem bridge. Runs independently
-             of DOSBox so it can be started before the emulator connects, and
-             so tomorrow's latency test does not depend on the emulator at all. -->
+        <!-- Port220: USB<->TCP nullmodem bridge service. -->
         <service
             android:name=".Port220UsbBridgeService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
-        <!-- Port220: bridge control. Exported so adb and the launcher can
-             start it; it in turn starts the non-exported service from the
-             foreground, which is what Android 12+ requires. -->
+        <!-- Port220: the single app entry point. Home screen that starts the
+             bridge and launches the emulator. Also auto-opens when the
+             Service Module is plugged in. -->
         <activity
             android:name=".Port220ControlActivity"
             android:exported="true"
-            android:label="@string/activity_bridge"
+            android:label="@string/app_name"
             android:theme="@android:style/Theme.Black">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -72,10 +69,8 @@
                 android:resource="@xml/port220_device_filter" />
         </activity>
 
-        <!-- Port220: isolated USB latency smoke test. Deliberately touches
-             nothing DOSBox-related; see PROCEDURES.md, Test 1. No USB-attach
-             filter here: the control activity owns that, and two filters on
-             the same device would put a chooser in front of the user. -->
+        <!-- Diagnostics: latency test. Not a launcher entry; kept for support
+             use, startable via adb. -->
         <activity
             android:name=".Port220LatencyTestActivity"
             android:exported="true"

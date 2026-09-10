@@ -107,3 +107,17 @@ badge suits an in-app splash if one is added later.
 
 Pad remap is a launch-time profile for the Port220 title only, mirroring how
 the Descent profile works, so games keep their normal mapping.
+
+## Single-app + pad-layout pass (Track I)
+
+| File | Change |
+|---|---|
+| `AndroidManifest.xml` | **Modified.** Only `Port220ControlActivity` is a LAUNCHER now (one icon). MainActivity keeps `exported` but loses its launcher category. |
+| `Port220ControlActivity.kt` | **Rewritten.** Single-app home screen: "Launch EMSAN1" starts the bridge, waits for the port to open, then launches the emulator. Brand-coloured, status line, overlay/baud/stop as secondary controls. |
+| `frontend/retrodos_frontend.cpp` | **Fixed + extended.** The pad-key remap now applies to `s` before `active = s` (previous version put it in an unused variable, which is why the mapping did not take). Also selects the Port220 pad layout at launch. |
+| `frontend/retrodos_pad.cpp` / `.h` | **Modified.** Adds `port220_pad_layout()`: d-pad + D/N/Y + Esc/Ent, no shoulders/triggers, clusters in the bottom corners clear of the fault text. Face buttons are labelled D/N/Y. |
+
+Root cause of the key mapping not working before: the running pad reads
+`active.pad_keys`, and the override had been written to a separate
+`launch_settings` used only for building the conf. Fixed by applying all
+Port220 overrides to `s` before `active = s`.

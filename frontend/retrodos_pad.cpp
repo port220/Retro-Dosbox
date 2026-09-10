@@ -107,6 +107,57 @@ std::vector<PadControl> default_pad_layout(int width, int height)
     return out;
 }
 
+std::vector<PadControl> port220_pad_layout(int width, int height)
+{
+    /* EMSAN1 needs far less than a game: move through menus, three answer
+     * keys, confirm, cancel. This layout drops the shoulders and triggers
+     * entirely and pushes the two clusters hard into the bottom corners, so
+     * the middle of the screen -- where all the fault text is -- stays clear.
+     * Compare default_pad_layout, whose face cluster sits at y=0.68 and lands
+     * on top of the text on a tall tablet display. */
+    std::vector<PadControl> out;
+    const float smaller = (float)std::min(width, height);
+    const float ux = smaller / (float)width;
+    const float uy = smaller / (float)height;
+    const float r    = 0.058f;
+    const float step = 0.135f;
+
+    auto add = [&](int button, const char *label, float cx, float cy,
+                   float ox, float oy) {
+        PadControl c;
+        c.button = button; c.label = label;
+        c.x = cx + ox * ux; c.y = cy + oy * uy; c.radius = r;
+        out.push_back(c);
+    };
+
+    /* Low corners, clear of the central text area. */
+    const float dpad_cx = 0.12f, dpad_cy = 0.80f;
+    const float face_cx = 0.88f, face_cy = 0.80f;
+
+    add(PAD_UP,    "^", dpad_cx, dpad_cy,  0.0f, -step);
+    add(PAD_DOWN,  "v", dpad_cx, dpad_cy,  0.0f,  step);
+    add(PAD_LEFT,  "<", dpad_cx, dpad_cy, -step,  0.0f);
+    add(PAD_RIGHT, ">", dpad_cx, dpad_cy,  step,  0.0f);
+
+    /* Face buttons carry their EMSAN1 letters as labels, so the glass says
+     * what the key does rather than an abstract A/X/Y. The scancodes come
+     * from port220_pad_keys(); these labels just match them. */
+    add(PAD_A, "D", face_cx, face_cy,  0.0f,  step);   /* A -> D (Delete Fault) */
+    add(PAD_X, "N", face_cx, face_cy, -step,  0.0f);   /* X -> N (No)           */
+    add(PAD_Y, "Y", face_cx, face_cy,  0.0f, -step);   /* Y -> Y (Yes)          */
+    /* B intentionally omitted: EMSAN1 has no fourth answer, and an unlabelled
+     * button invites mistaken presses. */
+
+    /* Esc / Ent, low centre, small. */
+    PadControl sel; sel.button = PAD_SELECT; sel.label = "Esc";
+    sel.x = 0.44f; sel.y = 0.94f; sel.radius = r * 0.75f; out.push_back(sel);
+
+    PadControl start; start.button = PAD_START; start.label = "Ent";
+    start.x = 0.56f; start.y = 0.94f; start.radius = r * 0.75f; out.push_back(start);
+
+    return out;
+}
+
 VirtualPad::VirtualPad() {}
 
 void VirtualPad::reset_layout(int w, int h)

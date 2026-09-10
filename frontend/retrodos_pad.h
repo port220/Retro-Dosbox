@@ -66,6 +66,11 @@ struct PadControl {
  */
 std::vector<PadControl> default_pad_layout(int width, int height);
 
+/* Port220: a stripped, corner-anchored layout for EMSAN1. D-pad, three face
+ * buttons (D/N/Y), Esc, Ent -- no shoulders or triggers, and the clusters
+ * pushed to the screen corners so they do not sit over the DOS text. */
+std::vector<PadControl> port220_pad_layout(int width, int height);
+
 /**
  * The on-screen pad.
  *
