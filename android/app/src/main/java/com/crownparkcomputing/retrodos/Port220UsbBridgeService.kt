@@ -13,7 +13,9 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.IBinder
+import android.os.Process
 import android.util.Log
+import com.hoho.android.usbserial.driver.FtdiSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialDriver
 import com.hoho.android.usbserial.driver.UsbSerialPort
 import com.hoho.android.usbserial.driver.UsbSerialProber
@@ -57,8 +59,41 @@ class Port220UsbBridgeService : Service() {
         /** Must match `port=` in the Port220 game's dosbox.conf. */
         const val NULLMODEM_PORT = 6403
 
-        private const val BAUD_RATE = 10400
-        private const val BAUD_RATE_FALLBACK = 9600
+        /* Switchable at runtime from the control activity rather than fixed.
+         *
+         * Which rate is correct is not settled: 10400 is the established
+         * figure, but EMSAN1 asks DOSBox for 9600, and on the Windows build
+         * (directserial) the guest's rate reaches the physical port directly
+         * -- so the wire there is 9600. With nullmodem on Mac the guest's
+         * rate is decoupled and the bridge sets the wire rate, so the two
+         * platforms may genuinely differ. A toggle beats guessing, and
+         * beats a rebuild per experiment. */
+        val BAUD_OPTIONS = intArrayOf(10400, 9600)
+
+        @Volatile
+        var baudRate: Int = 10400
+            private set
+
+        /** Takes effect on the next open; the FT232R is configured at open time. */
+        fun setBaudRate(b: Int) { baudRate = b }
+        /**
+         * FT232R latency timer, milliseconds.
+         *
+         * This is the single most consequential setting in this file. The
+         * FT232R holds received bytes until either its buffer fills or this
+         * timer expires, and only then sends a USB packet. Default is 16ms.
+         * On a half-duplex K-line where EMSAN1 sends one byte and waits for
+         * its echo before sending the next, every byte pays that timer -- the
+         * ~14ms round trips measured in the loopback test are this timer,
+         * not the USB stack.
+         *
+         * The Windows build tunes it via an FTDI registry key (which needed
+         * UAC). The iPad DriverKit design uses 2ms. Left at 16ms here would
+         * make Android roughly an order of magnitude slower per byte than
+         * either working platform, for no reason. 1ms is the minimum the
+         * chip accepts. */
+        private const val FTDI_LATENCY_MS = 1
+
         private const val DATA_BITS = UsbSerialPort.DATABITS_8
         private const val STOP_BITS = UsbSerialPort.STOPBITS_1
         private const val PARITY = UsbSerialPort.PARITY_NONE
@@ -220,7 +255,37 @@ class Port220UsbBridgeService : Service() {
         val port = driver.ports[0]
         try {
             port.open(connection)
-            port.setParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY)
+            port.setParameters(baudRate, DATA_BITS, STOP_BITS, PARITY)
+
+            // Latency timer: see FTDI_LATENCY_MS. Read back to prove it took;
+            // a silently ignored control transfer would leave the default and
+            // there would be no other sign.
+            if (port is FtdiSerialDriver.FtdiSerialPort) {
+                port.setLatencyTimer(FTDI_LATENCY_MS)
+                val actual = port.getLatencyTimer()
+                Log.i(TAG, "FTDI latency timer: requested ${FTDI_LATENCY_MS}ms, device reports ${actual}ms")
+                if (actual != FTDI_LATENCY_MS)
+                    Log.w(TAG, "Latency timer did not take -- per-byte round trip will be ~${actual}ms")
+            } else {
+                Log.w(TAG, "Port is not an FTDI port; latency timer not set")
+            }
+
+            // Stale bytes from a previous session, or noise while the line
+            // settled, must not be delivered as if the ECU had just sent them.
+            port.purgeHwBuffers(true, true)
+
+            // Assert the modem control lines.
+            //
+            // On the Windows build, directserial passes EMSAN1's DTR/RTS
+            // straight to the physical port, and DOS programs routinely raise
+            // both on open. Our DOSBox backend deliberately does not forward
+            // those (there is no side channel for it, and forwarding as data
+            // would corrupt the stream), so assert them here once. If the
+            // Service Module's line driver or inversion logic gates on either
+            // line, this is what makes it live.
+            port.setDTR(true)
+            port.setRTS(true)
+            Log.i(TAG, "DTR and RTS asserted")
         } catch (e: IOException) {
             Log.e(TAG, "Failed to open/configure serial port", e)
             lastStatus = "Serial config failed: ${e.message}"
@@ -231,7 +296,7 @@ class Port220UsbBridgeService : Service() {
         serialPort = port
         portOpen = true
         isPortOpen = true
-        lastStatus = "FT232R open at $BAUD_RATE baud"
+        lastStatus = "FT232R open at $baudRate baud"
         openCapture()
 
         // Bytes go straight out to the TCP socket as they arrive. The latency
@@ -264,9 +329,15 @@ class Port220UsbBridgeService : Service() {
                 updateNotification("USB error: ${e.message}")
                 closePort()
             }
-        }).also { it.start() }
+        }).also {
+            // The read thread is the one thing between an incoming byte and
+            // the TCP write. Audio priority keeps it from being descheduled
+            // behind UI work; on a latency budget that is worth having.
+            it.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            it.start()
+        }
 
-        Log.i(TAG, "Service Module open at $BAUD_RATE baud (fallback $BAUD_RATE_FALLBACK available)")
+        Log.i(TAG, "Service Module open at $baudRate baud")
         startNullmodemServer()
     }
 
@@ -287,7 +358,7 @@ class Port220UsbBridgeService : Service() {
             capture = java.io.BufferedWriter(java.io.FileWriter(f, false))
             captureBytes = 0
             captureStartMs = System.currentTimeMillis()
-            capture?.write("# Port220 capture, baud $BAUD_RATE 8N1\n")
+            capture?.write("# Port220 capture, baud $baudRate 8N1\n")
             capture?.write("# ms_since_start direction count hex\n")
             capture?.flush()
             Log.i(TAG, "Capturing to ${f.absolutePath}")

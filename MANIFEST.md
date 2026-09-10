@@ -61,3 +61,16 @@ the nullmodem config goes in as data, not as a code change.
 The core is a git submodule, so its sources are not ours to commit. The
 backend lives in `core-patch/` in this repo and is copied into the staged tree
 at build time — no second fork to maintain.
+
+## Review pass (Track F)
+
+| Change | Where | Why |
+|---|---|---|
+| FTDI latency timer 16ms → 1ms, verified by read-back | `Port220UsbBridgeService.kt` | Windows tunes this via registry; iPad design uses 2ms; Android was on the default. Per-byte round trip was ~14ms because of it. |
+| DTR/RTS asserted on open | `Port220UsbBridgeService.kt` | Matches what `directserial` passes through on Windows. |
+| Receive pacing at ~0.9 × byte time | `core-patch/port220serial.cpp` | Matches nullmodem, which Mac uses. |
+| Port220 gets `cycles=fixed 3000`, normal core | `frontend/retrodos_frontend.cpp` | Library default is `max`; 1990s DOS timing loops need a bounded CPU. |
+| Backend retries the connection | `core-patch/port220serial.cpp` | Start order no longer matters. |
+| Guest DTR/RTS/break logged | `core-patch/port220serial.cpp` | Shows what EMSAN1 does with the control lines. |
+| Purge on open, read thread at audio priority | `Port220UsbBridgeService.kt` | Removes stale bytes and scheduling jitter. |
+| Baud toggle, floating overlay | `Port220ControlActivity.kt`, `Port220Overlay.kt` | Experiment without rebuilding; watch counters over Retro-DOS. |

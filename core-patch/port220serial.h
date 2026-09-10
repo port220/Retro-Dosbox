@@ -39,11 +39,13 @@
 #define INCLUDEGUARD_PORT220SERIAL_H
 
 #include "serialport.h"
+#include <string>
 
 /* Our own polling event id. The base class reserves 0..SERIAL_BASE_EVENT_COUNT
  * (7), and nullmodem's ids are not compiled in here, but numbering above the
  * base count keeps this safe either way. */
 #define SERIAL_PORT220_POLL_EVENT (SERIAL_BASE_EVENT_COUNT + 1)
+#define SERIAL_PORT220_RX_PACE_EVENT (SERIAL_BASE_EVENT_COUNT + 2)
 
 class CSerialPort220 : public CSerial {
 public:
@@ -63,6 +65,21 @@ public:
 private:
     int  sock;              /* -1 when not connected */
     bool connected;
+
+    /* Retry state. The bridge and the emulator are started independently, so
+     * either order must work; the port stays present and reconnects when the
+     * bridge appears. */
+    std::string retry_host;
+    int         retry_port;
+    int         retry_ticks;
+
+    /* Receive pacing. True while a byte has been delivered and the next may
+     * not be until one byte time has elapsed -- see pollIncoming(). */
+    bool rx_pacing;
+
+    /* Diagnostics: how many control-line changes have been logged, so the
+     * log shows what EMSAN1 does on open without being flooded thereafter. */
+    int  ctrl_logs;
 
     bool openSocket(const char *host, int port);
     void closeSocket();

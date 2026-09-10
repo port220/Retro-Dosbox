@@ -36,11 +36,16 @@
  * baud (~0.96ms/byte), so bytes are picked up promptly without spinning. */
 #define PORT220_POLL_MS 1.0f
 
+/* Poll ticks between reconnect attempts (~500ms at a 1ms poll). */
+#define PORT220_RETRY_TICKS 500
+
 #define PORT220_DEFAULT_HOST "127.0.0.1"
 #define PORT220_DEFAULT_PORT 6403
 
 CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
-    : CSerial(id, cmd), sock(-1), connected(false)
+    : CSerial(id, cmd), sock(-1), connected(false),
+      retry_host(PORT220_DEFAULT_HOST), retry_port(PORT220_DEFAULT_PORT),
+      retry_ticks(0), rx_pacing(false), ctrl_logs(0)
 {
     CSerial::Init_Registers();
 
@@ -60,14 +65,21 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
         host = tmp;
     (void)getBituSubstring("port:", &port, cmd);
 
+    /* Keep the target for later retries. */
+    retry_host = host;
+    retry_port = (int)port;
+
+    /* A failed first connect is NOT fatal.
+     *
+     * Previously this set InstallationSuccessful = false and gave up, which
+     * made everything depend on the bridge being started before the emulator
+     * -- and getting that order wrong produced "Connection refused" and a
+     * dead port for the whole session. The bridge may legitimately come up a
+     * moment later, so retry from the poll event instead. The port exists
+     * either way, so EMSAN1 sees COM1 and can open it. */
     if (!openSocket(host.c_str(), (int)port)) {
-        /* Leaving InstallationSuccessful false makes serialport.cpp delete
-         * this object and leave the port absent, which is the honest outcome:
-         * better than a port that silently swallows everything. */
-        P220_LOG("Port220: could not connect to %s:%d -- is the bridge running?",
+        P220_LOG("Port220: bridge not up yet at %s:%d, will keep retrying",
                 host.c_str(), (int)port);
-        InstallationSuccessful = false;
-        return;
     }
 
     /* The far end is a USB serial adapter, not a modem. Assert the lines the
@@ -78,7 +90,6 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
     setCD(true);
     setRI(false);
 
-    P220_LOG("Port220: connected to %s:%d", host.c_str(), (int)port);
     InstallationSuccessful = true;
     setEvent(SERIAL_PORT220_POLL_EVENT, PORT220_POLL_MS);
 }
@@ -86,6 +97,7 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
 CSerialPort220::~CSerialPort220()
 {
     removeEvent(SERIAL_PORT220_POLL_EVENT);
+    removeEvent(SERIAL_PORT220_RX_PACE_EVENT);
     removeEvent(SERIAL_TX_EVENT);
     removeEvent(SERIAL_THR_EVENT);
     closeSocket();
@@ -129,6 +141,7 @@ bool CSerialPort220::openSocket(const char *host, int port)
     if (flags >= 0) ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
     connected = true;
+    P220_LOG("Port220: connected to %s:%d", host, port);
     return true;
 }
 
@@ -141,46 +154,61 @@ void CSerialPort220::closeSocket()
     connected = false;
 }
 
-/* Drain whatever the bridge has for us and hand it to the UART.
+/* Deliver at most ONE byte per call, then hold off for a byte time.
  *
- * Bounded per call: the guest's receive path can only take one byte at a
- * time, and CanReceiveByte() going false means its FIFO is full. Bytes left
- * in the socket stay there until the next poll, which is the correct
- * back-pressure -- reading them into a buffer we own would just move the
- * overflow somewhere with no flow control. */
+ * This matches the working Mac configuration. DOSBox-X's nullmodem does not
+ * hand the guest everything the socket holds; it delivers a byte, arms an
+ * event for ~0.9 x bytetime, and only then delivers the next. Bytes reach
+ * the emulated UART at line rate, as they would from a real wire.
+ *
+ * It matters here more than it would for a terminal program. EMSAN1 talks
+ * over a half-duplex line where its own transmissions echo back, and it
+ * gates on that echo. Dumping a burst into the UART faster than any physical
+ * serial line could carry it changes the inter-byte timing the program was
+ * written against. Matching line rate removes that as a variable.
+ *
+ * Bytes not yet delivered stay in the kernel socket buffer, which is the
+ * correct back-pressure: no buffer of our own to overflow. */
 void CSerialPort220::pollIncoming()
 {
-    if (!connected) return;
+    if (!connected || rx_pacing || !CanReceiveByte()) return;
 
-    uint8_t buf[64];
-    while (CanReceiveByte()) {
-        const ssize_t n = ::recv(sock, buf, 1, 0);
-        if (n == 1) {
-            receiveByte(buf[0]);
-            continue;
-        }
-        if (n == 0) {
-            P220_LOG("Port220: bridge closed the connection");
-            closeSocket();
-            return;
-        }
-        /* n < 0 */
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return;  /* nothing waiting */
-        if (errno == EINTR) continue;
-        P220_LOG("Port220: recv() failed: %s", strerror(errno));
+    uint8_t b;
+    const ssize_t n = ::recv(sock, &b, 1, 0);
+    if (n == 1) {
+        receiveByte(b);
+        rx_pacing = true;
+        setEvent(SERIAL_PORT220_RX_PACE_EVENT, bytetime * 0.9f);
+        return;
+    }
+    if (n == 0) {
+        P220_LOG("Port220: bridge closed the connection");
         closeSocket();
         return;
     }
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return;
+    P220_LOG("Port220: recv() failed: %s", strerror(errno));
+    closeSocket();
 }
 
 void CSerialPort220::handleUpperEvent(uint16_t type)
 {
     switch (type) {
     case SERIAL_PORT220_POLL_EVENT:
-        pollIncoming();
-        /* Re-arm unconditionally while connected. If the socket dropped,
-         * stop polling rather than spin on a dead descriptor. */
-        if (connected) setEvent(SERIAL_PORT220_POLL_EVENT, PORT220_POLL_MS);
+        if (connected) {
+            pollIncoming();
+        } else if (++retry_ticks >= PORT220_RETRY_TICKS) {
+            /* Roughly twice a second, not every millisecond: a refused
+             * connect is cheap but not free, and hammering it would show up
+             * as emulator jitter on a link we care about the timing of. */
+            retry_ticks = 0;
+            openSocket(retry_host.c_str(), retry_port);
+        }
+        setEvent(SERIAL_PORT220_POLL_EVENT, PORT220_POLL_MS);
+        break;
+
+    case SERIAL_PORT220_RX_PACE_EVENT:
+        rx_pacing = false;
         break;
 
     case SERIAL_THR_EVENT:
@@ -235,10 +263,45 @@ void CSerialPort220::updatePortConfig(uint16_t divider, uint8_t lcr)
 }
 
 void CSerialPort220::updateMSR()   { /* lines are static; nothing to sample */ }
-void CSerialPort220::setBreak(bool value) { (void)value; }
 
-/* Handshake lines are accepted and ignored. Sending them would put bytes on
- * the wire that EMSAN1's protocol does not expect. */
-void CSerialPort220::setRTSDTR(bool rts, bool dtr) { (void)rts; (void)dtr; }
-void CSerialPort220::setRTS(bool val) { (void)val; }
-void CSerialPort220::setDTR(bool val) { (void)val; }
+/* Control lines and break are accepted, logged, and not forwarded.
+ *
+ * Not forwarded because there is no side channel to the bridge and encoding
+ * them as data would corrupt the stream. Logged because what EMSAN1 does
+ * with DTR/RTS/break on open is currently unknown, and it decides whether
+ * the bridge asserting both lines statically is the right emulation of the
+ * Windows build (where directserial passes them through). Bounded so the
+ * log shows the open sequence without being flooded during the session. */
+#define P220_CTRL_LOG_BUDGET 16
+
+void CSerialPort220::setBreak(bool value)
+{
+    if (ctrl_logs < P220_CTRL_LOG_BUDGET) {
+        ctrl_logs++;
+        P220_LOG("Port220: guest set BREAK %s (not forwarded)", value ? "on" : "off");
+    }
+}
+
+void CSerialPort220::setRTSDTR(bool rts, bool dtr)
+{
+    if (ctrl_logs < P220_CTRL_LOG_BUDGET) {
+        ctrl_logs++;
+        P220_LOG("Port220: guest set RTS=%d DTR=%d (bridge holds both high)", rts ? 1 : 0, dtr ? 1 : 0);
+    }
+}
+
+void CSerialPort220::setRTS(bool val)
+{
+    if (ctrl_logs < P220_CTRL_LOG_BUDGET) {
+        ctrl_logs++;
+        P220_LOG("Port220: guest set RTS=%d (bridge holds it high)", val ? 1 : 0);
+    }
+}
+
+void CSerialPort220::setDTR(bool val)
+{
+    if (ctrl_logs < P220_CTRL_LOG_BUDGET) {
+        ctrl_logs++;
+        P220_LOG("Port220: guest set DTR=%d (bridge holds it high)", val ? 1 : 0);
+    }
+}

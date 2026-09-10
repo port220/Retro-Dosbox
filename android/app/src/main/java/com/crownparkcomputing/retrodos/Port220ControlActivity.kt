@@ -59,6 +59,20 @@ class Port220ControlActivity : Activity() {
         // fullscreen. Needs a permission Android will not grant from code,
         // so send the user to the right Settings page rather than failing
         // silently when it is missing.
+        // Baud toggle. Takes effect on the next open, so stop and start the
+        // bridge after changing it.
+        val baudBtn = Button(this).apply {
+            text = "Baud: ${Port220UsbBridgeService.baudRate}"
+            setOnClickListener {
+                val opts = Port220UsbBridgeService.BAUD_OPTIONS
+                val idx = opts.indexOf(Port220UsbBridgeService.baudRate)
+                val next = opts[(idx + 1) % opts.size]
+                Port220UsbBridgeService.setBaudRate(next)
+                text = "Baud: $next"
+                status.text = "Baud set to $next. Stop and start the bridge to apply."
+            }
+        }
+
         val overlayBtn = Button(this).apply {
             text = "Toggle overlay"
             setOnClickListener {
@@ -84,6 +98,7 @@ class Port220ControlActivity : Activity() {
             addView(status)
             addView(startBtn)
             addView(stopBtn)
+            addView(baudBtn)
             addView(overlayBtn)
         })
 

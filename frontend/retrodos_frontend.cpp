@@ -1149,8 +1149,28 @@ int main(int argc, char **argv)
         /* A conf shipped with the game states how it starts; use it verbatim
          * rather than the guessed program name. */
         const bool use_profile = !g.autoexec.empty();
+        /* Port220 gets its own CPU timing, not the library's.
+         *
+         * Retro-DOS defaults to cycles=max, which is right for games and
+         * wrong for this: EMSAN1 is 1990s real-mode diagnostic software, and
+         * that era's code uses busy-wait delay loops calibrated to CPU speed.
+         * At max those loops finish in no time, and the timing gates the
+         * program relies on -- including waiting on a K-line echo -- collapse.
+         *
+         * 3000 is DOSBox's classic default and what `core=auto` gives a
+         * real-mode program, i.e. what a default Mac config runs EMSAN1 at.
+         * Fixed rather than auto so it does not drift. A modest 286/386-class
+         * figure is the right starting point; adjust only with a captured
+         * reference to compare against, not by feel. */
+        retrodos::Settings launch_settings = s;
+        if (g.name == "Port220") {
+            launch_settings.cycles_max   = false;
+            launch_settings.cycles_fixed = 3000;
+            launch_settings.core_dynamic = false;   /* normal core: deterministic timing */
+        }
+
         const std::string conf = retrodos::build_conf(
-            s, g.name, g.dir,
+            launch_settings, g.name, g.dir,
             use_profile ? g.autoexec : g.run,
             use_profile ? true : g.run_raw,
             g.audio_profile);
