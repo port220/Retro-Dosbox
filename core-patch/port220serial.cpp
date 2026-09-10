@@ -20,6 +20,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+/* The core has no Android logging of its own: LOG_MSG goes to stdout, which
+ * Android discards. Everything this backend reports would otherwise be
+ * invisible -- and "did the backend even run?" is the first question worth
+ * being able to answer. liblog is already linked into libretrodos.so. */
+#if defined(ANDROID) || defined(__ANDROID__)
+#include <android/log.h>
+#define P220_LOG(...) __android_log_print(ANDROID_LOG_INFO, "Port220Serial", __VA_ARGS__)
+#else
+#define P220_LOG(...) LOG_MSG(__VA_ARGS__)
+#endif
+
 /* Poll interval in milliseconds of emulated time. 1ms matches what nullmodem
  * uses for its own polling event and is well below one byte time at 10400
  * baud (~0.96ms/byte), so bytes are picked up promptly without spinning. */
@@ -32,6 +43,12 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
     : CSerial(id, cmd), sock(-1), connected(false)
 {
     CSerial::Init_Registers();
+
+    /* Logged before anything can fail. If this line is absent from logcat,
+     * DOSBox-X never reached this backend at all -- meaning the [serial] type
+     * was not recognised, which points at the core patch rather than at
+     * anything on the wire. That distinction was previously invisible. */
+    P220_LOG("Port220: backend constructing for serial%d", (int)id + 1);
 
     std::string host = PORT220_DEFAULT_HOST;
     Bitu port = PORT220_DEFAULT_PORT;
@@ -47,7 +64,7 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
         /* Leaving InstallationSuccessful false makes serialport.cpp delete
          * this object and leave the port absent, which is the honest outcome:
          * better than a port that silently swallows everything. */
-        LOG_MSG("Port220: could not connect to %s:%d -- is the bridge running?",
+        P220_LOG("Port220: could not connect to %s:%d -- is the bridge running?",
                 host.c_str(), (int)port);
         InstallationSuccessful = false;
         return;
@@ -61,7 +78,7 @@ CSerialPort220::CSerialPort220(Bitu id, CommandLine *cmd)
     setCD(true);
     setRI(false);
 
-    LOG_MSG("Port220: connected to %s:%d", host.c_str(), (int)port);
+    P220_LOG("Port220: connected to %s:%d", host.c_str(), (int)port);
     InstallationSuccessful = true;
     setEvent(SERIAL_PORT220_POLL_EVENT, PORT220_POLL_MS);
 }
@@ -78,7 +95,7 @@ bool CSerialPort220::openSocket(const char *host, int port)
 {
     sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        LOG_MSG("Port220: socket() failed: %s", strerror(errno));
+        P220_LOG("Port220: socket() failed: %s", strerror(errno));
         return false;
     }
 
@@ -87,7 +104,7 @@ bool CSerialPort220::openSocket(const char *host, int port)
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
     if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
-        LOG_MSG("Port220: bad host address '%s'", host);
+        P220_LOG("Port220: bad host address '%s'", host);
         closeSocket();
         return false;
     }
@@ -96,7 +113,7 @@ bool CSerialPort220::openSocket(const char *host, int port)
      * bridge is not listening. A non-blocking connect would only add states
      * to get wrong. */
     if (::connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        LOG_MSG("Port220: connect() failed: %s", strerror(errno));
+        P220_LOG("Port220: connect() failed: %s", strerror(errno));
         closeSocket();
         return false;
     }
@@ -143,14 +160,14 @@ void CSerialPort220::pollIncoming()
             continue;
         }
         if (n == 0) {
-            LOG_MSG("Port220: bridge closed the connection");
+            P220_LOG("Port220: bridge closed the connection");
             closeSocket();
             return;
         }
         /* n < 0 */
         if (errno == EAGAIN || errno == EWOULDBLOCK) return;  /* nothing waiting */
         if (errno == EINTR) continue;
-        LOG_MSG("Port220: recv() failed: %s", strerror(errno));
+        P220_LOG("Port220: recv() failed: %s", strerror(errno));
         closeSocket();
         return;
     }
@@ -193,7 +210,7 @@ void CSerialPort220::transmitByte(uint8_t val, bool first)
             if (n > 0) { off += (size_t)n; continue; }
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
                 continue;
-            LOG_MSG("Port220: send() failed: %s", strerror(errno));
+            P220_LOG("Port220: send() failed: %s", strerror(errno));
             closeSocket();
             break;
         }
@@ -213,7 +230,7 @@ void CSerialPort220::updatePortConfig(uint16_t divider, uint8_t lcr)
     (void)lcr;
     if (divider) {
         const int baud = 115200 / (int)divider;
-        LOG_MSG("Port220: guest requested %d baud (bridge is fixed at its own rate)", baud);
+        P220_LOG("Port220: guest requested %d baud (bridge is fixed at its own rate)", baud);
     }
 }
 
