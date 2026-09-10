@@ -131,35 +131,46 @@ cd "$TREE"
 PATCHDIR="$APP/core-patch"
 SERIALDIR="$TREE/src/hardware/serialport"
 
-if [ -d "$PATCHDIR" ]; then
-    echo "==> injecting Port220 serial backend"
+# Hard failure, not a skip. An earlier version of this made the whole block
+# conditional on core-patch/ existing, which meant a missing or unstaged
+# patch directory produced a core that built, ran, and could not talk to the
+# bridge -- with no error anywhere. That is the exact class of silent failure
+# this project has lost the most time to.
+[ -d "$PATCHDIR" ] || {
+    echo "error: $PATCHDIR is missing." >&2
+    echo "       The Port220 serial backend lives there. Without it the core" >&2
+    echo "       builds fine but has no way to reach the bridge." >&2
+    exit 1
+}
 
-    for f in port220serial.cpp port220serial.h; do
-        [ -f "$PATCHDIR/$f" ] || { echo "error: missing $PATCHDIR/$f" >&2; exit 1; }
-        cp "$PATCHDIR/$f" "$SERIALDIR/$f"
-    done
+echo "==> injecting Port220 serial backend"
 
-    # (a) build it: add to the serial library's source list.
-    if ! grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am"; then
-        sed -i 's|serialdummy\.cpp serialdummy\.h serialport\.cpp|serialdummy.cpp serialdummy.h serialport.cpp port220serial.cpp port220serial.h|' \
-            "$SERIALDIR/Makefile.am"
-        grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am" || {
-            echo "error: could not add port220serial.cpp to Makefile.am" >&2; exit 1; }
-    fi
+for f in port220serial.cpp port220serial.h; do
+    [ -f "$PATCHDIR/$f" ] || { echo "error: missing $PATCHDIR/$f" >&2; exit 1; }
+    cp "$PATCHDIR/$f" "$SERIALDIR/$f"
+done
 
-    # (b) declare it.
-    if ! grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp"; then
-        sed -i 's|#include "nullmodem.h"|#include "nullmodem.h"\n#include "port220serial.h"|' \
-            "$SERIALDIR/serialport.cpp"
-        grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp" || {
-            echo "error: could not add the port220serial.h include" >&2; exit 1; }
-    fi
+# (a) build it: add to the serial library's source list.
+if ! grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am"; then
+    sed -i 's|serialdummy\.cpp serialdummy\.h serialport\.cpp|serialdummy.cpp serialdummy.h serialport.cpp port220serial.cpp port220serial.h|' \
+        "$SERIALDIR/Makefile.am"
+    grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am" || {
+        echo "error: could not add port220serial.cpp to Makefile.am" >&2; exit 1; }
+fi
 
-    # (c) register the type. Inserted before the "disabled" branch, which sits
-    #     OUTSIDE the #if C_MODEM block -- putting it inside would compile it
-    #     out again and reproduce the exact bug this fixes.
-    if ! grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp"; then
-        python3 - "$SERIALDIR/serialport.cpp" <<'PYEOF'
+# (b) declare it.
+if ! grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp"; then
+    sed -i 's|#include "nullmodem.h"|#include "nullmodem.h"\n#include "port220serial.h"|' \
+        "$SERIALDIR/serialport.cpp"
+    grep -q '#include "port220serial.h"' "$SERIALDIR/serialport.cpp" || {
+        echo "error: could not add the port220serial.h include" >&2; exit 1; }
+fi
+
+# (c) register the type. Inserted before the "disabled" branch, which sits
+#     OUTSIDE the #if C_MODEM block -- putting it inside would compile it
+#     out again and reproduce the exact bug this fixes.
+if ! grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp"; then
+    python3 - "$SERIALDIR/serialport.cpp" <<'PYEOF'
 import sys, io
 path = sys.argv[1]
 src = io.open(path, encoding='utf-8', errors='surrogateescape').read()
@@ -182,14 +193,20 @@ if anchor not in src:
 src = src.replace(anchor, block + anchor, 1)
 io.open(path, 'w', encoding='utf-8', errors='surrogateescape').write(src)
 PYEOF
-        grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp" || {
-            echo "error: could not register the port220 serial type" >&2; exit 1; }
-    fi
-
-    # autotools must regenerate: Makefile.am changed.
-    rm -f "$TREE/config.h" "$SERIALDIR/Makefile.in"
-    echo "==> Port220 serial backend injected"
+    grep -q 'CSerialPort220' "$SERIALDIR/serialport.cpp" || {
+        echo "error: could not register the port220 serial type" >&2; exit 1; }
 fi
+
+# Belt and braces: prove all three landed before spending 20 minutes compiling.
+grep -q 'port220serial\.cpp' "$SERIALDIR/Makefile.am" || { echo "error: Makefile.am patch lost" >&2; exit 1; }
+grep -q 'port220serial\.h'   "$SERIALDIR/serialport.cpp" || { echo "error: include patch lost" >&2; exit 1; }
+grep -q 'CSerialPort220'     "$SERIALDIR/serialport.cpp" || { echo "error: registration patch lost" >&2; exit 1; }
+
+# autotools must regenerate: Makefile.am changed. Both files are gitignored
+# upstream and so absent from the staged tree anyway, which means autogen.sh
+# below always runs and picks up the edited Makefile.am.
+rm -f "$TREE/config.h" "$SERIALDIR/Makefile.in"
+echo "==> Port220 serial backend injected and verified"
 
 [ -f configure ] || ./autogen.sh
 
