@@ -187,3 +187,16 @@ flat. Existing installs must be re-pushed — see Track M step 4.
 
 The PDF is NOT in this overlay. Drop it into
 `android/app/src/main/assets/XJ220_Service_Manual.pdf` (Track M step 1).
+
+## Branding pass (Track N)
+
+| File | Change |
+|---|---|
+| `res/mipmap-*/ic_launcher*.png` | **Replaced.** Gold badge on a black field, all five densities, adaptive fore/background layers. Foreground badge at 60% width so its ends survive a circular mask. |
+| `res/drawable-*/port220_logo.png` | **New.** The badge for in-app display, five densities. |
+| `Port220ControlActivity.kt` | Logo above the title; title text now "Command Module" (the badge carries the brand). Home screen background changed to black, matching the badge artwork, which carries its own black field and would otherwise show a rectangle. Launch button renamed "Launch Diagnostics". |
+
+"Launch Diagnostics" rather than "Launch EMSAN1": EMSAN1 is the XJ220
+program. XJR-15 runs EMDAJ032 and XJR-S runs DIAG3, so a program name on the
+button is wrong for two of the three vehicles. Status text now names the
+selected vehicle instead.

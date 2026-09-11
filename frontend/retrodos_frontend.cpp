@@ -1032,8 +1032,17 @@ int main(int argc, char **argv)
             const std::string p220_dir =
                 cfg_dir + kPort220DirName + "/" + v.dir;
             SDL_PathInfo p220_info;
-            if (SDL_GetPathInfo(p220_dir.c_str(), &p220_info) &&
-                p220_info.type == SDL_PATHTYPE_DIRECTORY) {
+            const bool found = SDL_GetPathInfo(p220_dir.c_str(), &p220_info) &&
+                               p220_info.type == SDL_PATHTYPE_DIRECTORY;
+
+            /* Logged either way. When this directory is missing the library
+             * comes back empty and the bundled demo entries appear instead,
+             * which looks like the app forgot about Port220 rather than like
+             * a missing payload. Naming the path removes the guesswork. */
+            LOGI("Port220: vehicle=%s dir=%s %s",
+                 v.key, p220_dir.c_str(), found ? "FOUND" : "NOT FOUND");
+
+            if (found) {
                 Game g;
                 g.port220  = true;
                 g.name     = v.label;

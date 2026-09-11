@@ -16,6 +16,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.FileProvider
@@ -28,7 +29,11 @@ import kotlin.concurrent.thread
  * This is the only launcher icon. The emulator (MainActivity) is no longer a
  * separate app; it is started from here. The flow the product wants is:
  *
- *   plug in Service Module -> open Port220 -> tap Launch -> EMSAN1
+ *   plug in Service Module -> pick vehicle -> tap Launch -> diagnostics
+ *
+ * "Diagnostics" rather than "EMSAN1": that is the XJ220 program. The XJR-15
+ * runs EMDAJ032 and the XJR-S runs DIAG3, so a program name on the button
+ * would be wrong for two of the three vehicles.
  *
  * and the ordering constraint that shaped the whole architecture still holds:
  * the bridge's TCP socket must be listening before the emulator's serial
@@ -69,12 +74,23 @@ class Port220ControlActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // The badge carries the brand, so the wordmark below it only needs to
+        // say what this app is. Repeating "Port220" under the logo would be
+        // redundant.
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.port220_logo)
+            adjustViewBounds = true
+            // fitCenter so the badge scales to the width without distorting;
+            // it is a long thin mark and any stretch is obvious.
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+
         val title = TextView(this).apply {
-            text = "Port220 Command Module"
-            textSize = 22f
+            text = "Command Module"
+            textSize = 20f
             setTextColor(Color.rgb(217, 193, 126))   // brand gold
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 16, 0, 24)
         }
 
         status = TextView(this).apply {
@@ -93,7 +109,7 @@ class Port220ControlActivity : Activity() {
 
         // The one button that matters. Large, primary, does the whole flow.
         launchBtn = Button(this).apply {
-            text = "Launch EMSAN1"
+            text = "Launch Diagnostics"
             textSize = 18f
             setOnClickListener { beginLaunch() }
         }
@@ -129,8 +145,13 @@ class Port220ControlActivity : Activity() {
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.rgb(11, 17, 25))   // brand dark
+            // Black, matching the badge artwork and the launcher icon. The
+            // logo PNG carries its own black field (it is cropped from a
+            // photographed badge, not a cut-out), so anything other than
+            // black leaves a visible rectangle behind it.
+            setBackgroundColor(Color.BLACK)
             setPadding(64, 64, 64, 64)
+            addView(logo, logoParams())
             addView(title)
             addView(status)
             addView(vehicleBtn, wide())
@@ -235,7 +256,7 @@ class Port220ControlActivity : Activity() {
         fun waitForBridge() {
             when {
                 Port220UsbBridgeService.isPortOpen -> {
-                    status.text = "Service Module ready — starting EMSAN1…"
+                    status.text = "Service Module ready — starting ${vehicles[selected].label} diagnostics…"
                     handler.postDelayed({ launchEmulator() }, 300)
                 }
                 System.currentTimeMillis() - start > timeoutMs -> {
@@ -265,7 +286,7 @@ class Port220ControlActivity : Activity() {
             startActivity(Intent(this, MainActivity::class.java))
         } catch (t: Throwable) {
             android.util.Log.e("Port220Launch", "Failed to start emulator", t)
-            status.text = "Could not start EMSAN1:\n${t.javaClass.simpleName}: ${t.message}"
+            status.text = "Could not start diagnostics:\n${t.javaClass.simpleName}: ${t.message}"
         } finally {
             launching = false
             launchBtn.isEnabled = true
@@ -308,7 +329,7 @@ class Port220ControlActivity : Activity() {
                 val line = buildString {
                     append(if (Port220UsbBridgeService.isPortOpen) "● Service Module connected"
                            else "○ Service Module not connected")
-                    if (Port220UsbBridgeService.isBridgeReady) append("   ● EMSAN1 linked")
+                    if (Port220UsbBridgeService.isBridgeReady) append("   ● Diagnostics linked")
                 }
                 runOnUiThread {
                     if (!launching) status.text = line
@@ -317,6 +338,11 @@ class Port220ControlActivity : Activity() {
             }
         }
     }
+
+    /** Logo at 70% of screen width; height follows via adjustViewBounds. */
+    private fun logoParams() = LinearLayout.LayoutParams(
+        (resources.displayMetrics.widthPixels * 0.70).toInt(),
+        LinearLayout.LayoutParams.WRAP_CONTENT)
 
     private fun wide() = LinearLayout.LayoutParams(
         (resources.displayMetrics.widthPixels * 0.6).toInt(),
