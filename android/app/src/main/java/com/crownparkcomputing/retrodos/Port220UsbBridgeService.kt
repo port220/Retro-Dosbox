@@ -155,6 +155,8 @@ class Port220UsbBridgeService : Service() {
     /** Guards against the multiple-open path that caused the endpoint fight. */
     @Volatile private var portOpen = false
     @Volatile private var serverStarted = false
+    /** True once startForeground has succeeded; see promoteToForeground(). */
+    @Volatile private var isForeground = false
 
     /** Bidirectional capture, for offline analysis of a failed session. */
     private var capture: java.io.BufferedWriter? = null
@@ -180,14 +182,47 @@ class Port220UsbBridgeService : Service() {
         super.onCreate()
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Waiting for Service Module\u2026"))
 
+        // NOT startForeground() here.
+        //
+        // Android 15+ (targetSDK 35/36) validates a connectedDevice FGS
+        // against two conditions: the app must hold
+        // FOREGROUND_SERVICE_CONNECTED_DEVICE (we declare it), AND it must
+        // actually have a connected device at that instant -- for USB, a
+        // granted UsbDevice permission. In onCreate we have not requested
+        // permission yet, so the second condition fails and the system throws
+        // SecurityException, killing the process. That is the crash on
+        // "Launch EMSAN1": it was never the emulator, it was this service
+        // taking the app down as it started.
+        //
+        // So the foreground promotion is deferred until openDevice()
+        // succeeds, by which point the USB permission is held and the
+        // connectedDevice type is legitimate.
         val filter = IntentFilter(ACTION_USB_PERMISSION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(usbPermissionReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(usbPermissionReceiver, filter)
+        }
+    }
+
+    /**
+     * Promote to foreground, now that the FT232R is open and the USB
+     * permission grant makes the connectedDevice type valid.
+     *
+     * Guarded: calling startForeground twice is harmless but pointless, and
+     * a failure here must not kill the app -- the bridge is still perfectly
+     * usable as a started service while the activity is in front, which is
+     * the normal case for this tool.
+     */
+    private fun promoteToForeground(text: String) {
+        if (isForeground) return
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(text))
+            isForeground = true
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not promote to foreground service: ${e.message}")
         }
     }
 
@@ -296,6 +331,8 @@ class Port220UsbBridgeService : Service() {
         serialPort = port
         portOpen = true
         isPortOpen = true
+        // Safe to claim connectedDevice now: the USB permission is held.
+        promoteToForeground("Service Module connected")
         lastStatus = "FT232R open at $baudRate baud"
         openCapture()
 
@@ -473,6 +510,7 @@ class Port220UsbBridgeService : Service() {
         try { serverSocket?.close() } catch (_: IOException) {}
         try { clientSocket?.close() } catch (_: IOException) {}
         serverStarted = false
+        isForeground = false
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -496,6 +534,9 @@ class Port220UsbBridgeService : Service() {
             .build()
 
     private fun updateNotification(text: String) {
+        // Only meaningful once we are a foreground service with a live
+        // notification; before that there is nothing on screen to update.
+        if (!isForeground) return
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(NOTIFICATION_ID, buildNotification(text))
     }

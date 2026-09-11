@@ -32,7 +32,15 @@
         <!-- The emulator. No longer a launcher entry. Port220 is a single
              app whose entry point is the control screen, which starts the
              bridge and then launches this. Still exported so the control
-             activity can start it by component. -->
+             activity can start it by component.
+
+             No android:process here. A previous revision put the emulator in
+             its own process as a defensive measure against SDLActivity's
+             process-wide statics; that was unproven speculation added in the
+             same build as a real fix, which made the two impossible to tell
+             apart when it still failed. MainActivity provably works in the
+             main process, because that is how it ran as its own launcher
+             icon. Changing one thing at a time. -->
         <activity
             android:name=".MainActivity"
             android:label="@string/activity_emulator"
@@ -76,5 +84,20 @@
             android:exported="true"
             android:label="@string/activity_latency"
             android:theme="@android:style/Theme.Black.NoTitleBar" />
+
+        <!-- Hands the bundled service manual PDF to an external viewer.
+             An asset has no file path another app can open, so it is copied
+             to cache and shared as a content URI. Scope is cache only; see
+             res/xml/port220_file_paths.xml. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/port220_file_paths" />
+        </provider>
+
     </application>
 </manifest>

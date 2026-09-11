@@ -1,7 +1,8 @@
 package com.crownparkcomputing.retrodos
 
 import android.app.Activity
-import android.content.ComponentName
+import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -17,6 +18,8 @@ import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.FileProvider
+import java.io.File
 import kotlin.concurrent.thread
 
 /**
@@ -36,6 +39,27 @@ import kotlin.concurrent.thread
  */
 class Port220ControlActivity : Activity() {
 
+    companion object {
+        /** Must match the filename placed in app/src/main/assets/. */
+        private const val MANUAL_NAME = "XJ220_Service_Manual.pdf"
+    }
+
+    /**
+     * Vehicles, matching the drop-down in the Mac and Windows builds and the
+     * kPort220Vehicles table in the frontend. `key` is what gets written to
+     * files/port220_vehicle; the C++ side reads it to pick the mount
+     * directory and the program. Keep the two tables in step.
+     */
+    private data class Vehicle(val key: String, val label: String)
+
+    private val vehicles = listOf(
+        Vehicle("XJ220", "XJ220"),
+        Vehicle("XJR15", "XJR-15"),
+        Vehicle("XJR-S", "XJR-S")
+    )
+    private var selected = 0
+
+    private lateinit var vehicleBtn: Button
     private lateinit var status: TextView
     private lateinit var launchBtn: Button
     private val handler = Handler(Looper.getMainLooper())
@@ -58,6 +82,13 @@ class Port220ControlActivity : Activity() {
             setTextColor(Color.rgb(180, 200, 180))
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, 40)
+        }
+
+        // Vehicle picker. A dialog rather than a Spinner: same one-tap-then-
+        // choose interaction, far less adapter machinery, and it reads clearly
+        // on a tablet at arm's length in a workshop.
+        vehicleBtn = Button(this).apply {
+            setOnClickListener { pickVehicle() }
         }
 
         // The one button that matters. Large, primary, does the whole flow.
@@ -83,6 +114,11 @@ class Port220ControlActivity : Activity() {
                     status.text = "Baud set to $next — reconnect the module to apply."
             }
         }
+        val manualBtn = Button(this).apply {
+            text = "Service manual"
+            setOnClickListener { openManual() }
+        }
+
         val stopBtn = Button(this).apply {
             text = "Stop service"
             setOnClickListener {
@@ -97,8 +133,10 @@ class Port220ControlActivity : Activity() {
             setPadding(64, 64, 64, 64)
             addView(title)
             addView(status)
+            addView(vehicleBtn, wide())
             addView(launchBtn, wide())
             addView(spacer(48))
+            addView(manualBtn)
             addView(overlayBtn)
             addView(baudBtn)
             addView(stopBtn)
@@ -111,7 +149,76 @@ class Port220ControlActivity : Activity() {
             startBridge()
         }
 
+        loadSelection()
         startPolling()
+    }
+
+    /* ---- vehicle selection ---------------------------------------------- */
+
+    private fun selectionFile() = File(filesDir, "port220_vehicle")
+
+    private fun loadSelection() {
+        val key = try {
+            if (selectionFile().exists()) selectionFile().readText().trim() else ""
+        } catch (e: Exception) { "" }
+        val idx = vehicles.indexOfFirst { it.key == key }
+        selected = if (idx >= 0) idx else 0
+        // Written back even when defaulting, so the frontend and this screen
+        // always agree on what will launch.
+        saveSelection()
+    }
+
+    private fun saveSelection() {
+        try {
+            selectionFile().writeText(vehicles[selected].key)
+        } catch (e: Exception) {
+            android.util.Log.w("Port220", "Could not save vehicle selection", e)
+        }
+        vehicleBtn.text = "Vehicle: ${vehicles[selected].label}"
+    }
+
+    private fun pickVehicle() {
+        AlertDialog.Builder(this)
+            .setTitle("Select vehicle")
+            .setItems(vehicles.map { it.label }.toTypedArray()) { _, which ->
+                selected = which
+                saveSelection()
+                status.text = "${vehicles[selected].label} selected."
+            }
+            .show()
+    }
+
+    /* ---- service manual -------------------------------------------------- */
+
+    /**
+     * Opens the bundled PDF in whatever viewer the device has.
+     *
+     * The asset is copied to cache first: an APK asset has no file path a
+     * separate app can open, and a content URI through FileProvider is the
+     * only way to hand it over without the receiving app needing storage
+     * permission. Copied once, then reused.
+     */
+    private fun openManual() {
+        try {
+            val out = File(cacheDir, MANUAL_NAME)
+            if (!out.exists() || out.length() == 0L) {
+                status.text = "Preparing manual\u2026"
+                assets.open(MANUAL_NAME).use { input ->
+                    out.outputStream().use { input.copyTo(it) }
+                }
+            }
+            val uri = FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", out)
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        } catch (e: ActivityNotFoundException) {
+            status.text = "No PDF viewer installed on this tablet."
+        } catch (e: Exception) {
+            android.util.Log.e("Port220", "Could not open manual", e)
+            status.text = "Could not open the manual: ${e.message}"
+        }
     }
 
     /** Start bridge, wait for the socket, then launch the emulator. */
@@ -146,17 +253,40 @@ class Port220ControlActivity : Activity() {
     }
 
     private fun launchEmulator() {
-        startActivity(Intent().apply {
-            component = ComponentName(packageName, "$packageName.MainActivity")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
-        // Re-enable for next time; MainActivity comes to the foreground over us.
-        launching = false
-        launchBtn.isEnabled = true
+        // Wrapped so a launch failure reports itself instead of taking the
+        // whole app down. An uncaught exception here kills the process, drops
+        // the user on the home screen, and leaves nothing on screen to read --
+        // which is exactly what made the last two attempts guesswork.
+        //
+        // By class reference, not a name built from packageName: that returns
+        // the applicationId (com.dosboxx.app) while the class lives in the
+        // namespace (com.crownparkcomputing.retrodos). They differ here.
+        try {
+            startActivity(Intent(this, MainActivity::class.java))
+        } catch (t: Throwable) {
+            android.util.Log.e("Port220Launch", "Failed to start emulator", t)
+            status.text = "Could not start EMSAN1:\n${t.javaClass.simpleName}: ${t.message}"
+        } finally {
+            launching = false
+            launchBtn.isEnabled = true
+        }
     }
 
     private fun startBridge() {
-        startForegroundService(Intent(this, Port220UsbBridgeService::class.java))
+        // startService, NOT startForegroundService.
+        //
+        // startForegroundService imposes a ~5 second deadline for the service
+        // to call startForeground(), and the service now deliberately waits
+        // past that -- it cannot legally claim the connectedDevice type until
+        // the USB permission is granted, which involves a dialog the user may
+        // take a while to answer. Missing that deadline is itself a crash.
+        //
+        // A plain startService is allowed here because this activity is
+        // visible when the button is pressed, so it is not a background start.
+        // The service promotes itself to foreground the moment the FT232R
+        // opens, which is what keeps it alive once the emulator takes over
+        // the screen.
+        startService(Intent(this, Port220UsbBridgeService::class.java))
     }
 
     private fun toggleOverlay() {

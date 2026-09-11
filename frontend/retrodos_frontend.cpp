@@ -88,7 +88,57 @@ static const char *kPort220Sections =
  * construction, so there is no ownership question and no SAF grant needed. */
 static const char *kPort220DirName = "/port220";
 
+/* The vehicles Port220 supports, and what each one runs.
+ *
+ * Each variant ships its own DOS diagnostic program -- they are different
+ * executables, not one program with a switch -- so the entry has to select
+ * both the mount directory and the command. Matches the drop-down in the Mac
+ * and Windows builds, and the C:\Port220 payload layout. */
+struct Port220Vehicle {
+    const char *key;    /* written by the home screen into port220_vehicle  */
+    const char *label;  /* shown in the library list                        */
+    const char *dir;    /* subdirectory under files/port220                 */
+    const char *exe;    /* program to run                                   */
+};
+
+static const Port220Vehicle kPort220Vehicles[] = {
+    { "XJ220",  "Port220 - XJ220",  "XJ220",  "EMSAN1.EXE"   },
+    { "XJR15",  "Port220 - XJR-15", "XJR15",  "EMDAJ032.EXE" },
+    { "XJR-S",  "Port220 - XJR-S",  "XJR-S",  "DIAG3.EXE"    },
+};
+static const int kPort220VehicleCount =
+    (int)(sizeof(kPort220Vehicles) / sizeof(kPort220Vehicles[0]));
+
+/* Which vehicle the home screen last selected.
+ *
+ * Written as plain text by Port220ControlActivity into the app's internal
+ * files directory, read here. A file rather than an intent extra because the
+ * emulator is started through SDLActivity, which owns its own startup path;
+ * a file needs no cooperation from it and survives the process restart. */
+static const Port220Vehicle &port220_selected_vehicle(const std::string &cfg_dir)
+{
+    const std::string sel_path = cfg_dir + "/port220_vehicle";
+    size_t len = 0;
+    if (void *data = SDL_LoadFile(sel_path.c_str(), &len)) {
+        std::string key((const char *)data, len);
+        SDL_free(data);
+        /* Trim whitespace/newline: the file is written by hand-rolled code and
+         * a stray newline must not silently select the default. */
+        while (!key.empty() && (key.back() == '\n' || key.back() == '\r' ||
+                                key.back() == ' '  || key.back() == '\t'))
+            key.pop_back();
+        for (int i = 0; i < kPort220VehicleCount; ++i)
+            if (key == kPort220Vehicles[i].key) return kPort220Vehicles[i];
+    }
+    return kPort220Vehicles[0];   /* default: XJ220 */
+}
+
 struct Game {
+    /* True for the synthetic Port220 entry. The launch path applies CPU
+     * timing and pad overrides for it, and must not match on the display
+     * name -- that name now varies by vehicle (XJ220 / XJR-15 / XJR-S). */
+    bool        port220 = false;
+
     std::string name;
     std::string dir;          /* real path; empty for a SAF game until staged */
     std::string run;          /* DOS command, may be empty */
@@ -978,19 +1028,22 @@ int main(int argc, char **argv)
          * there is nothing to silently discard. This is the whole reason the
          * entry is synthetic instead of a folder in the library. */
         {
-            const std::string p220_dir = cfg_dir + kPort220DirName;
+            const Port220Vehicle &v = port220_selected_vehicle(cfg_dir);
+            const std::string p220_dir =
+                cfg_dir + kPort220DirName + "/" + v.dir;
             SDL_PathInfo p220_info;
             if (SDL_GetPathInfo(p220_dir.c_str(), &p220_info) &&
                 p220_info.type == SDL_PATHTYPE_DIRECTORY) {
                 Game g;
-                g.name     = "Port220";
+                g.port220  = true;
+                g.name     = v.label;
                 g.dir      = p220_dir;
                 g.initial  = 'P';
-                g.run      = "EMSAN1.EXE";
+                g.run      = v.exe;
                 g.run_raw  = true;
                 /* Non-empty autoexec makes the launch path use it verbatim,
                  * which is what we want: mount, C:, then the program. */
-                g.autoexec = "EMSAN1.EXE\n";
+                g.autoexec = std::string(v.exe) + "\n";
                 /* Passed through build_conf's extra_sections untouched. The
                  * field is named for audio because that was its only use
                  * upstream; it is simply "sections emitted verbatim". */
@@ -1163,7 +1216,7 @@ int main(int argc, char **argv)
          *
          * Pad: relabel the face buttons to the letters EMSAN1's prompts expect
          * (A->D, X->N, Y->Y); arrows, Enter, Escape unchanged. */
-        if (g.name == "Port220") {
+        if (g.port220) {
             s.cycles_max   = false;
             s.cycles_fixed = 3000;
             s.core_dynamic = false;

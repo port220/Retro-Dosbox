@@ -121,3 +121,69 @@ Root cause of the key mapping not working before: the running pad reads
 `active.pad_keys`, and the override had been written to a separate
 `launch_settings` used only for building the conf. Fixed by applying all
 Port220 overrides to `s` before `active = s`.
+
+## Launch fix (Track J)
+
+| File | Change |
+|---|---|
+| `Port220ControlActivity.kt` | **Fixed.** Launches MainActivity by class reference (`Intent(this, MainActivity::class.java)`). The previous code built the name from `packageName`, which returns the applicationId (`com.dosboxx.app`), while the class lives in the namespace (`com.crownparkcomputing.retrodos`). The result was a non-existent component, `ActivityNotFoundException`, and a crash to home. Also drops `FLAG_ACTIVITY_NEW_TASK`, which had forced the emulator into a separate task. |
+| `AndroidManifest.xml` | **Modified.** MainActivity gets `android:process=":emulator"` so SDL's process-wide statics start clean on every launch, including a second Launch after EMSAN1 exits. |
+
+Root cause was the applicationId/namespace split, the same one that broke the
+adb component name earlier in the project. The separate process is defensive:
+it was not the immediate crash, but it prevents the relaunch failure that
+would have appeared on the second press.
+
+## Launch fix, second attempt (Track K)
+
+| File | Change |
+|---|---|
+| `res/mipmap-*/ic_launcher*.png` | **Replaced.** Built from the supplied PORT220 badge artwork. Background layer is the plate green sampled from that image; foreground is the badge scaled into the adaptive safe zone. |
+| `AndroidManifest.xml` | **Reverted.** `android:process=":emulator"` removed. It was speculation shipped alongside a real fix, which made the result impossible to attribute when it still failed. |
+| `Port220ControlActivity.kt` | **Modified.** The launch is wrapped in try/catch: a failure now prints the exception class and message on screen instead of killing the process. |
+
+Honest status: the launch failure is NOT diagnosed. The class-reference fix
+was real but was not sufficient, so something else is wrong. This build is
+instrumented to report the cause rather than guess at it again.
+
+## Launch crash: root cause found (Track L)
+
+The crash was never in the emulator. Logcat named it exactly:
+
+```
+SecurityException: Starting FGS with type connectedDevice targetSDK=36
+  requires allOf=[FOREGROUND_SERVICE_CONNECTED_DEVICE]
+       and anyOf=[BLUETOOTH_*, CHANGE_NETWORK_STATE, ..., USB Device, USB Accessory]
+  at Port220UsbBridgeService.onCreate(Port220UsbBridgeService.kt:183)
+```
+
+Android 15+ validates a `connectedDevice` foreground service against two
+conditions: the declared permission (satisfied) AND actually holding a
+connected device at that instant -- for USB, a granted UsbDevice permission.
+`startForeground()` ran in `onCreate`, before permission was requested, so the
+second condition failed and the system killed the process.
+
+Every "Launch EMSAN1" press starts the service, so the service took the app
+down. Earlier builds survived only when a USB grant from a previous session
+was already in place.
+
+| File | Change |
+|---|---|
+| `Port220UsbBridgeService.kt` | `startForeground()` moved out of `onCreate` into `promoteToForeground()`, called once the FT232R is open and the USB permission is held. Wrapped in try/catch; `updateNotification` no-ops before promotion. |
+| `Port220ControlActivity.kt` | `startForegroundService()` -> `startService()`. The former imposes a ~5s deadline to call `startForeground()`, which the deferred design deliberately exceeds; a plain start is legal because the activity is visible. |
+
+## Vehicle selector + service manual (Track M)
+
+| File | Change |
+|---|---|
+| `frontend/retrodos_frontend.cpp` | Vehicle table (`kPort220Vehicles`) and `port220_selected_vehicle()` reading `files/port220_vehicle`. The synthetic entry now mounts `files/port220/<dir>` and runs that vehicle's program. Adds `Game::port220`, so the CPU/pad overrides key on a flag rather than the display name (which now varies). |
+| `Port220ControlActivity.kt` | Vehicle picker dialog, persisted selection, and a Service manual button that copies the bundled PDF to cache and opens it via FileProvider. |
+| `AndroidManifest.xml` | FileProvider declaration, cache-scoped. |
+| `res/xml/port220_file_paths.xml` | **New.** Shares only cache; `files/` (payload, captures, selection) stays private. |
+| `app/build.gradle.kts` | `androidx.core:core-ktx` declared explicitly for FileProvider. |
+
+Payload layout changed: DOS files now live in `files/port220/<VEHICLE>/`, not
+flat. Existing installs must be re-pushed — see Track M step 4.
+
+The PDF is NOT in this overlay. Drop it into
+`android/app/src/main/assets/XJ220_Service_Manual.pdf` (Track M step 1).

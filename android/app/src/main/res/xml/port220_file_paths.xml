@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the cache directory is shared, and only the manual lands there.
+     Deliberately narrow: nothing in files/ (the EMSAN1 payload, captures,
+     the vehicle selection) is exposed to other apps. -->
+<paths>
+    <cache-path name="manual" path="." />
+</paths>

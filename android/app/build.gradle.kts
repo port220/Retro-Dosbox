@@ -151,4 +151,11 @@ dependencies {
     // Port220: FT232R access to the Service Module over USB Host mode.
     // Bundles its own FTDI driver, so no separate FTDI SDK is needed.
     implementation("com.github.mik3y:usb-serial-for-android:3.9.0")
+
+    // FileProvider, for handing the bundled service manual to a PDF viewer.
+    // Declared explicitly rather than relied on transitively through
+    // documentfile/activity: a transitive dependency can be dropped by a
+    // future version bump, and this one is load-bearing for a user-facing
+    // button.
+    implementation("androidx.core:core-ktx:1.13.1")
 }
